@@ -5,6 +5,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { ApiStack } from '../lib/api-stack';
 import { AuthStack } from '../lib/auth-stack';
 import { BudgetStack } from '../lib/budget-stack';
+import { CiStack } from '../lib/ci-stack';
+import { WebStack } from '../lib/web-stack';
 import { FORBIDDEN_RESOURCE_PREFIXES, CostGuardAspect } from '../lib/cost-guard';
 import { DataStack } from '../lib/data-stack';
 
@@ -29,7 +31,9 @@ beforeAll(() => {
     userPoolClient: auth.userPoolClient,
     webOrigin: WEB,
   });
-  stacks = [budget, auth, d, a];
+  const web = new WebStack(app, 'Web', { env, apiUrl: a.api.apiEndpoint });
+  const ci = new CiStack(app, 'Ci', { env, githubRepo: 'o/r', branch: 'main' });
+  stacks = [budget, auth, d, a, web, ci];
   data = Template.fromStack(d);
   api = Template.fromStack(a); // bundle Lambda ด้วย esbuild จริง
 }, 120_000);
@@ -68,10 +72,12 @@ describe('ทั้ง app: กฎค่าใช้จ่าย', () => {
     expect(count).toBe(3); // api, account, access logs
   });
 
-  it('S3 bucket (ถ้ามี) ต้อง block public access ทั้งหมด', () => {
+  it('S3 bucket ทุกตัวต้อง block public access ทั้งหมด', () => {
+    let buckets = 0;
     for (const s of stacks) {
-      const buckets = Template.fromStack(s).findResources('AWS::S3::Bucket');
-      for (const b of Object.values(buckets)) {
+      const found = Template.fromStack(s).findResources('AWS::S3::Bucket');
+      for (const b of Object.values(found)) {
+        buckets++;
         expect(b.Properties.PublicAccessBlockConfiguration).toEqual({
           BlockPublicAcls: true,
           BlockPublicPolicy: true,
@@ -80,6 +86,7 @@ describe('ทั้ง app: กฎค่าใช้จ่าย', () => {
         });
       }
     }
+    expect(buckets).toBe(1); // เว็บ bucket
   });
 });
 

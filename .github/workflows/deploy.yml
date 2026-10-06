@@ -1,0 +1,131 @@
+name: deploy
+
+# deploy เมื่อ push เข้า main (หรือกดเอง) — ต้องผ่าน ci ก่อน
+# ต้องตั้งค่าใน GitHub (Settings → Secrets and variables → Actions):
+#   variables: AWS_DEPLOY_ROLE_ARN (output ของ MoneyFlow-CiStack), ANOMALY_MONITOR_ARN (ถ้ามี monitor เดิม)
+#   secrets:   ALERT_EMAIL
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  CDK_STACKS: >-
+    MoneyFlow-BudgetStack MoneyFlow-AuthStack MoneyFlow-DataStack MoneyFlow-ApiStack MoneyFlow-WebStack
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # ตั้ง protection rule (เช่น ต้องกดอนุมัติ) ได้ที่ Settings → Environments → production
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # สำหรับ GitHub OIDC → IAM role (ไม่มี access key)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: money-flow-deploy-${{ github.run_id }}
+
+      - name: Resolve existing web origin (for API CORS)
+        id: origin
+        run: |
+          url=$(aws cloudformation describe-stacks --stack-name MoneyFlow-WebStack \
+            --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text 2>/dev/null || true)
+          [ "$url" = "None" ] && url=""
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: CDK synth + cost report
+        working-directory: infra
+        env:
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          ANOMALY_MONITOR_ARN: ${{ vars.ANOMALY_MONITOR_ARN }}
+          WEB_ORIGIN: ${{ steps.origin.outputs.url }}
+        run: |
+          npx cdk synth --quiet
+          node ../scripts/cost-report.mjs
+
+      - name: CDK deploy
+        working-directory: infra
+        env:
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          ANOMALY_MONITOR_ARN: ${{ vars.ANOMALY_MONITOR_ARN }}
+          WEB_ORIGIN: ${{ steps.origin.outputs.url }}
+        run: npx cdk deploy $CDK_STACKS --require-approval never --outputs-file cdk-outputs.json
+
+      - name: Read outputs
+        id: out
+        working-directory: infra
+        run: |
+          o() { jq -r --arg s "$1" --arg k "$2" '.[$s][$k]' cdk-outputs.json; }
+          {
+            echo "api=$(o MoneyFlow-ApiStack ViteApiUrl)"
+            echo "pool=$(o MoneyFlow-AuthStack ViteCognitoUserPoolId)"
+            echo "client=$(o MoneyFlow-AuthStack ViteCognitoClientId)"
+            echo "region=$(o MoneyFlow-AuthStack ViteAwsRegion)"
+            echo "web=$(o MoneyFlow-WebStack WebUrl)"
+            echo "bucket=$(o MoneyFlow-WebStack WebBucketName)"
+            echo "dist=$(o MoneyFlow-WebStack WebDistributionId)"
+          } >> "$GITHUB_OUTPUT"
+
+      # deploy ครั้งแรก: ยังไม่รู้โดเมน CloudFront ตอน deploy ApiStack → deploy ApiStack ซ้ำพร้อม CORS ที่ถูกต้อง
+      - name: Update API CORS with CloudFront origin (first deploy only)
+        if: steps.origin.outputs.url == ''
+        working-directory: infra
+        env:
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          ANOMALY_MONITOR_ARN: ${{ vars.ANOMALY_MONITOR_ARN }}
+          WEB_ORIGIN: ${{ steps.out.outputs.web }}
+        run: npx cdk deploy MoneyFlow-ApiStack --require-approval never
+
+      - name: Build web
+        env:
+          VITE_API_URL: ${{ steps.out.outputs.api }}
+          VITE_COGNITO_USER_POOL_ID: ${{ steps.out.outputs.pool }}
+          VITE_COGNITO_CLIENT_ID: ${{ steps.out.outputs.client }}
+          VITE_AWS_REGION: ${{ steps.out.outputs.region }}
+        run: npm run build -w web
+
+      # อัปโหลด assets (มี hash) ก่อน แล้วค่อยอัปโหลด index.html/sw.js → ผู้ใช้ไม่เจอไฟล์ที่ยังไม่ขึ้น
+      - name: Upload to S3
+        env:
+          BUCKET: ${{ steps.out.outputs.bucket }}
+        run: |
+          aws s3 sync web/dist/assets "s3://$BUCKET/assets" \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 sync web/dist "s3://$BUCKET" --delete --exclude "assets/*" \
+            --cache-control "no-cache"
+
+      - name: Invalidate CloudFront (index.html, sw.js)
+        env:
+          DIST: ${{ steps.out.outputs.dist }}
+        run: aws cloudfront create-invalidation --distribution-id "$DIST" --paths /index.html /sw.js
+
+      - name: Summary
+        run: echo "### 🚀 Deployed → ${{ steps.out.outputs.web }}" >> "$GITHUB_STEP_SUMMARY"

@@ -2,9 +2,11 @@ import { App, Aspects, Tags } from 'aws-cdk-lib';
 import { ApiStack } from '../lib/api-stack';
 import { AuthStack } from '../lib/auth-stack';
 import { BudgetStack } from '../lib/budget-stack';
+import { CiStack } from '../lib/ci-stack';
 import { REGION, TAGS } from '../lib/config';
 import { CostGuardAspect } from '../lib/cost-guard';
 import { DataStack } from '../lib/data-stack';
+import { WebStack } from '../lib/web-stack';
 
 const app = new App();
 
@@ -55,7 +57,7 @@ const data = new DataStack(app, 'MoneyFlow-DataStack', {
   enablePitr,
 });
 
-new ApiStack(app, 'MoneyFlow-ApiStack', {
+const api = new ApiStack(app, 'MoneyFlow-ApiStack', {
   env,
   description: 'Money Flow - HTTP API + Lambda',
   table: data.table,
@@ -64,6 +66,20 @@ new ApiStack(app, 'MoneyFlow-ApiStack', {
   webOrigin,
 });
 
-// Phase 6: WebStack
+// WebStack ใช้ URL ของ API ใน CSP; ApiStack รับโดเมน CloudFront ผ่าน context webOrigin (ไม่อ้างอิงวนกัน)
+new WebStack(app, 'MoneyFlow-WebStack', {
+  env,
+  description: 'Money Flow - S3 + CloudFront (OAC)',
+  apiUrl: api.api.apiEndpoint,
+});
+
+// CiStack: deploy ด้วยมือครั้งเดียว (CI ไม่ deploy stack นี้ เพื่อไม่ให้แก้สิทธิ์ของตัวเองได้)
+new CiStack(app, 'MoneyFlow-CiStack', {
+  env,
+  description: 'Money Flow - GitHub Actions OIDC deploy role',
+  githubRepo: ctx('githubRepo', 'GITHUB_REPOSITORY') ?? 'Pongpaii/AWS_Iexpense',
+  branch: ctx('deployBranch', 'DEPLOY_BRANCH') ?? 'main',
+  existingOidcProviderArn: ctx('githubOidcProviderArn', 'GITHUB_OIDC_PROVIDER_ARN'),
+});
 
 app.synth();

@@ -33,3 +33,7 @@ export const BUDGET_ACTUAL_THRESHOLDS_USD = [1, 5, 20] as const;
 export const BUDGET_FORECAST_THRESHOLD_USD = 10;
 /** แจ้งเตือน anomaly เมื่อผลกระทบรวม ≥ $1 */
 export const ANOMALY_IMPACT_THRESHOLD_USD = 1;
+
+/** ชื่อ bucket เว็บแบบกำหนดได้ล่วงหน้า → CiStack ให้สิทธิ์ได้โดยไม่ต้องอ้างอิงข้าม stack */
+export const webBucketName = (account: string, region: string) =>
+  `${PROJECT}-web-${account}-${region}`;

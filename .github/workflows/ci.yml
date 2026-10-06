@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  pull_request:
+  # main รันผ่าน deploy.yml (workflow_call) อยู่แล้ว → ไม่รันซ้ำ
+  push:
+    branches-ignore: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # synth ทุก stack (cost-guard aspect จะทำให้ล้มถ้ามี resource ต้องห้าม) + สรุปค่าใช้จ่าย
+      - name: CDK synth + cost report
+        working-directory: infra
+        run: |
+          npx cdk synth --quiet -c alertEmail=ci@example.com
+          node ../scripts/cost-report.mjs
