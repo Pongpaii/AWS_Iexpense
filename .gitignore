@@ -1,0 +1,21 @@
+node_modules/
+dist/
+dev-dist/
+coverage/
+cdk.out/
+cdk-outputs.json
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+
+# Android (Capacitor)
+web/android/.gradle/
+web/android/build/
+web/android/app/build/
+web/android/local.properties
+*.keystore
+*.jks
