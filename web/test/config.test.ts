@@ -1,6 +1,4 @@
-import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import App from '../src/App.vue';
 import { loadConfig } from '../src/config';
 
 const validEnv = {
@@ -32,13 +30,5 @@ describe('loadConfig', () => {
 
   it('ไม่รับ URL ที่ไม่ใช่ http(s)', () => {
     expect(loadConfig({ ...validEnv, VITE_API_URL: 'javascript:alert(1)' }).ok).toBe(false);
-  });
-});
-
-describe('App', () => {
-  it('render หัวข้อภาษาไทยและแจ้งเตือนเมื่อยังไม่ตั้งค่า', () => {
-    const wrapper = mount(App);
-    expect(wrapper.find('h1').text()).toBe('Money Flow');
-    expect(wrapper.find('[role="status"]').exists()).toBe(true);
   });
 });

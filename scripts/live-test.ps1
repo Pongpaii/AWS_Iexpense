@@ -1,7 +1,7 @@
 ﻿# Live curl test (temporary) — tokens read from %TEMP%\mf_a.tok / mf_b.tok
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-$API = 'https://lesp7s1im6.execute-api.ap-southeast-1.amazonaws.com'
+$API = (Get-Content (Join-Path $PSScriptRoot '..\web\.env.local') | Where-Object { $_ -match '^VITE_API_URL=' }) -replace '^VITE_API_URL=', ''
 $TOK = @{ a = (Get-Content -Raw "$env:TEMP\mf_a.tok"); b = (Get-Content -Raw "$env:TEMP\mf_b.tok") }
 $script:pass = 0; $script:fail = 0
 

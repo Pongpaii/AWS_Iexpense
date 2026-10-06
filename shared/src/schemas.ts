@@ -408,7 +408,8 @@ export function defaultSettings(): UserSettings {
 
 /** settings → body สำหรับ PUT /settings (ตัด updatedAt ออก) */
 export function settingsToInput({ updatedAt: _, ...rest }: UserSettings): SettingsInput {
-  return structuredClone(rest);
+  // JSON clone (ไม่ใช้ structuredClone): รองรับ Proxy ของ Vue reactive/readonly ด้วย
+  return JSON.parse(JSON.stringify(rest)) as SettingsInput;
 }
 
 /* -------------------------------------------------------------------------- */
