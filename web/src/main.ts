@@ -50,7 +50,17 @@ void initMonitoring(app)
 
 app.mount('#app')
 
-// register ผ่าน virtual module (ไม่ใช้ inline script) เพื่อให้ CSP script-src 'self' ใช้ได้
-if (import.meta.env.PROD) {
-  void import('virtual:pwa-register').then(({ registerSW }) => registerSW({ immediate: true }))
+// เลิกใช้ PWA: ถอน service worker เก่าที่เคยติดตั้งไว้ และล้าง cache ของมัน
+// เพื่อให้ผู้ใช้เดิมได้ UI ล่าสุดจากเซิร์ฟเวอร์ทุกครั้ง
+if ('serviceWorker' in navigator) {
+  void navigator.serviceWorker
+    .getRegistrations()
+    .then((registrations) => Promise.all(registrations.map((r) => r.unregister())))
+    .catch(() => undefined)
+}
+if ('caches' in window) {
+  void caches
+    .keys()
+    .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+    .catch(() => undefined)
 }

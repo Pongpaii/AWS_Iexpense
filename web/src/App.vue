@@ -11,7 +11,6 @@ import RecordPage from './pages/RecordPage.vue'
 import { useAchievements } from './composables/useAchievements'
 import { useAppMessages } from './composables/useAppMessages'
 import { useAuth } from './composables/useAuth'
-import { useInstallPrompt } from './composables/useInstallPrompt'
 import { useNavigation } from './composables/useNavigation'
 import { useServerSettings } from './composables/useServerSettings'
 import { useTransactions } from './composables/useTransactions'
@@ -59,13 +58,6 @@ const {
   clearError,
   clearAll: clearMessages,
 } = useAppMessages()
-
-const {
-  canInstall,
-  installing: installBusy,
-  install: installApp,
-  dismiss: dismissInstall,
-} = useInstallPrompt()
 
 const showError = (message: string) => {
   errorMessage.value = message
@@ -570,30 +562,6 @@ onMounted(() => void auth.initialize())
         </div>
       </aside>
 
-      <aside v-if="canInstall" class="install-banner" role="complementary">
-        <div class="install-banner__icon" aria-hidden="true">⬇</div>
-        <div class="install-banner__copy">
-          <strong>ติดตั้ง Money Flow ไว้บนเครื่อง</strong>
-          <p>เปิดได้จากหน้าโฮมเหมือนแอปทั่วไป และใช้จดรายการตอนไม่มีเน็ตได้</p>
-        </div>
-        <button
-          class="install-banner__primary"
-          type="button"
-          :disabled="installBusy"
-          @click="installApp"
-        >
-          {{ installBusy ? 'กำลังติดตั้ง...' : 'ติดตั้ง' }}
-        </button>
-        <button
-          class="install-banner__close"
-          type="button"
-          aria-label="ไม่ติดตั้งตอนนี้"
-          @click="dismissInstall()"
-        >
-          ×
-        </button>
-      </aside>
-
       <div v-if="errorMessage" class="alert alert--error" role="alert">
         <span>!</span>{{ errorMessage }}
         <button type="button" aria-label="ปิดข้อความ" @click="errorMessage = ''">×</button>
@@ -835,101 +803,6 @@ onMounted(() => void auth.initialize())
   max-width: 210px;
   padding: 5px 9px;
   border-radius: 10px;
-}
-
-.install-banner {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  margin-bottom: 12px;
-  padding: 13px 15px;
-  border: 1px solid #cfe3d6;
-  border-radius: 14px;
-  background: linear-gradient(120deg, #f2f9f5, #eaf4ee);
-}
-
-.install-banner__icon {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  place-items: center;
-  border-radius: 10px;
-  color: #fff;
-  background: #2f815c;
-  font-size: 0.95rem;
-}
-
-.install-banner__copy {
-  min-width: 0;
-  flex: 1;
-}
-
-.install-banner__copy strong {
-  color: #1f5d40;
-  font-family: 'Noto Sans Thai', sans-serif;
-  font-size: 0.74rem;
-}
-
-.install-banner__copy p {
-  margin: 2px 0 0;
-  color: #62736a;
-  font-family: 'Noto Sans Thai', sans-serif;
-  font-size: 0.63rem;
-  line-height: 1.5;
-}
-
-.install-banner__primary {
-  min-height: 36px;
-  flex: 0 0 auto;
-  padding: 8px 15px;
-  border: 0;
-  border-radius: 9px;
-  color: #fff;
-  background: #2f815c;
-  font-family: 'Noto Sans Thai', sans-serif;
-  font-size: 0.68rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.install-banner__primary:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.install-banner__close {
-  width: 26px;
-  height: 26px;
-  flex: 0 0 26px;
-  border: 0;
-  border-radius: 8px;
-  color: #7b8a82;
-  background: transparent;
-  font-size: 1rem;
-  cursor: pointer;
-}
-
-.install-banner__close:hover {
-  color: #1f5d40;
-  background: rgba(47, 129, 92, 0.1);
-}
-
-.install-banner__primary:focus-visible,
-.install-banner__close:focus-visible {
-  outline: 3px solid rgba(47, 129, 92, 0.35);
-  outline-offset: 2px;
-}
-
-@media (max-width: 580px) {
-  .install-banner {
-    flex-wrap: wrap;
-  }
-
-  .install-banner__primary {
-    width: 100%;
-  }
 }
 
 .offline-badge {

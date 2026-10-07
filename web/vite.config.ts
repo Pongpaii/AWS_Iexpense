@@ -1,27 +1,9 @@
 import vue from '@vitejs/plugin-vue'
-import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vitest/config'
 
+// ไม่ใช้ PWA/service worker แล้ว — public/sw.js เป็นตัวล้าง SW เก่าบนเครื่องผู้ใช้เท่านั้น
 export default defineConfig({
-  plugins: [
-    vue(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      // register ผ่าน main.ts (virtual:pwa-register) → ไม่ต้องมี inline script (CSP เข้มได้)
-      injectRegister: false,
-      // ใช้ public/manifest.webmanifest ของหน้าจอเดิม
-      manifest: false,
-      workbox: {
-        // app shell เท่านั้น — ข้อมูลการเงินไม่ cache ใน SW
-        globPatterns: ['**/*.{html,js,css,svg,png,ico,webmanifest,woff2}'],
-        navigateFallback: '/index.html',
-        cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true,
-      },
-      devOptions: { enabled: false },
-    }),
-  ],
+  plugins: [vue()],
   server: { port: 5173, strictPort: true },
   build: {
     target: 'es2022',
