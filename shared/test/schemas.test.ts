@@ -305,3 +305,63 @@ describe('achievement / account', () => {
     expect(accountDeleteSchema.safeParse({ confirm: 'yes' }).success).toBe(false);
   });
 });
+
+describe('settings.dailyCapPlan', () => {
+  const plan = () => ({
+    enabled: true,
+    excludedCategories: ['ที่พัก'],
+    weekday: {
+      cap: 320,
+      items: [
+        {
+          id: 'weekday-lunch',
+          emoji: '🍜',
+          label: 'กลางวัน',
+          amount: 70,
+          keywords: ['เที่ยง'],
+          timeWindow: { start: '12:00', end: '14:59' },
+          category: 'อาหาร',
+        },
+      ],
+    },
+    weekend: { cap: 243.5, items: [] },
+  });
+
+  it('ค่าเริ่มต้นเป็น null (ยังไม่เคยบันทึก)', () => {
+    expect(settingsInputSchema.parse({}).dailyCapPlan).toBeNull();
+    expect(defaultSettings().dailyCapPlan).toBeNull();
+  });
+
+  it('รับแผนที่ถูกต้อง และ round-trip ผ่าน settingsSchema ได้', () => {
+    const data = settingsInputSchema.parse({ dailyCapPlan: plan() });
+    expect(data.dailyCapPlan).toEqual(plan());
+    const res = settingsSchema.parse({ ...data, updatedAt: null });
+    expect(res.dailyCapPlan).toEqual(plan());
+  });
+
+  it('response เก่าที่ไม่มี field นี้ → null', () => {
+    const { dailyCapPlan: _, ...legacy } = defaultSettings();
+    expect(settingsSchema.parse(legacy).dailyCapPlan).toBeNull();
+  });
+
+  it('ปฏิเสธเวลา/ช่องเกิน/คีย์แปลก', () => {
+    const badTime = plan();
+    badTime.weekday.items[0]!.timeWindow = { start: '25:00', end: '01:00' };
+    expect(settingsInputSchema.safeParse({ dailyCapPlan: badTime }).success).toBe(false);
+
+    const tooMany = plan();
+    tooMany.weekday.items = Array.from({ length: 11 }, (_, i) => ({
+      ...plan().weekday.items[0]!,
+      id: `x${i}`,
+    }));
+    expect(settingsInputSchema.safeParse({ dailyCapPlan: tooMany }).success).toBe(false);
+
+    expect(
+      settingsInputSchema.safeParse({ dailyCapPlan: { ...plan(), hacked: true } }).success,
+    ).toBe(false);
+    expect(
+      settingsInputSchema.safeParse({ dailyCapPlan: { ...plan(), weekday: { cap: 0, items: [] } } })
+        .success,
+    ).toBe(false);
+  });
+});

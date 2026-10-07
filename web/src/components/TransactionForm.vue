@@ -1,319 +1,378 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import {
-  EXPENSE_CATEGORIES,
-  INCOME_CATEGORIES,
-  formatZodError,
-  transactionCreateSchema,
-  transactionUpdateSchema,
+  transactionCategories,
   type Transaction,
-  type TransactionCreateInput,
-  type TransactionUpdateInput,
-} from '@money-flow/shared';
-import { computed, nextTick, reactive, ref, useId, watch } from 'vue';
-import { clientTimeZone, todayLocal } from '../lib/date';
+  type TransactionCategory,
+  type TransactionInput,
+  type TransactionType,
+} from '../types/transaction'
+import {
+  DESCRIPTION_MAX_LENGTH,
+  validateTransactionInput,
+  type TransactionFieldErrors,
+} from '../schemas/transaction.schema'
 
 const props = defineProps<{
-  /** มีค่า = โหมดแก้ไข */
-  editing?: Transaction | null;
-  submitting?: boolean;
-  /** โหมดแก้ไขต้องออนไลน์ */
-  disabled?: boolean;
-}>();
+  editing: Transaction | null
+  busy: boolean
+  disabled?: boolean
+  defaultDate?: string
+}>()
 
 const emit = defineEmits<{
-  create: [input: TransactionCreateInput];
-  update: [id: string, patch: TransactionUpdateInput];
-  cancel: [];
-}>();
+  submit: [value: TransactionInput]
+  cancel: []
+}>()
 
-const uid = useId();
-const id = (name: string) => `${uid}-${name}`;
-const formEl = ref<HTMLFormElement | null>(null);
+interface FormState {
+  description: string
+  amount: number | null
+  type: TransactionType
+  category: TransactionCategory | ''
+  transaction_date: string
+}
 
-const blank = () => ({
-  type: 'expense' as 'income' | 'expense',
+const today = () => {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60_000
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10)
+}
+
+const defaultTransactionDate = () => props.defaultDate ?? today()
+
+const form = reactive<FormState>({
   description: '',
-  amount: '' as string | number,
+  amount: null,
+  type: 'expense',
   category: '',
-  transactionDate: todayLocal(),
-});
-const form = reactive(blank());
-const errors = ref<Record<string, string>>({});
-const formError = ref('');
-/**
- * idempotencyKey สร้างครั้งเดียวต่อ "การกรอก 1 รายการ"
- * กดบันทึกซ้ำ/ลองใหม่หลัง error ใช้ key เดิม → server ไม่บันทึกซ้ำ
- */
-let idempotencyKey = crypto.randomUUID();
+  transaction_date: defaultTransactionDate(),
+})
 
-const isEdit = computed(() => !!props.editing);
-const categories = computed(() =>
-  form.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES,
-);
+const isEditing = computed(() => props.editing !== null)
+
+const fieldErrors = ref<TransactionFieldErrors>({})
+/** กันกดซ้ำในจังหวะที่ prop busy ยังไม่ทันอัปเดตกลับมา */
+const submitLocked = ref(false)
+
+const isBusy = computed(() => props.busy || submitLocked.value)
+
+const clearFieldError = (field: keyof TransactionFieldErrors) => {
+  if (fieldErrors.value[field]) {
+    fieldErrors.value = { ...fieldErrors.value, [field]: undefined }
+  }
+}
+
+const resetForm = () => {
+  form.description = ''
+  form.amount = null
+  form.type = 'expense'
+  form.category = ''
+  form.transaction_date = defaultTransactionDate()
+  fieldErrors.value = {}
+}
+
+const toggleCategory = (category: TransactionCategory) => {
+  form.category = form.category === category ? '' : category
+  clearFieldError('category')
+}
 
 watch(
   () => props.editing,
-  (t) => {
-    errors.value = {};
-    formError.value = '';
-    if (t) {
-      Object.assign(form, {
-        type: t.type,
-        description: t.description,
-        amount: String(t.amount),
-        category: t.category ?? '',
-        transactionDate: t.transactionDate,
-      });
-    } else {
-      Object.assign(form, blank());
+  (transaction) => {
+    if (!transaction) {
+      resetForm()
+      return
     }
+
+    form.description = transaction.description
+    form.amount = transaction.amount
+    form.type = transaction.type
+    form.category = transaction.category ?? ''
+    form.transaction_date = transaction.transaction_date
+    fieldErrors.value = {}
   },
   { immediate: true },
-);
+)
 
-/** เปลี่ยนประเภทแล้วหมวดเดิมไม่มีในรายการ → ล้าง */
 watch(
-  () => form.type,
-  () => {
-    if (form.category && !(categories.value as readonly string[]).includes(form.category)) {
-      form.category = '';
-    }
+  () => props.defaultDate,
+  (date) => {
+    if (!props.editing && date) form.transaction_date = date
   },
-);
+)
 
-function values() {
-  return {
+let unlockTimer: ReturnType<typeof setTimeout> | undefined
+
+const handleSubmit = () => {
+  if (isBusy.value || props.disabled) return
+
+  const candidate = {
     description: form.description,
-    // v-model บน type=number ให้ค่าเป็น number (หรือ '' เมื่อว่าง)
-    amount: String(form.amount ?? '').trim() === '' ? Number.NaN : Number(form.amount),
+    amount: form.amount === null ? Number.NaN : Number(form.amount),
     type: form.type,
-    category: form.category || null,
-    transactionDate: form.transactionDate,
-  };
-}
-
-async function focusFirstError() {
-  await nextTick();
-  formEl.value?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
-}
-
-async function onSubmit() {
-  formError.value = '';
-  const v = values();
-
-  if (props.editing) {
-    const t = props.editing;
-    const patch: Record<string, unknown> = {};
-    if (v.description.trim() !== t.description) patch.description = v.description;
-    if (v.amount !== t.amount) patch.amount = v.amount;
-    if (v.type !== t.type) patch.type = v.type;
-    if (v.category !== t.category) patch.category = v.category;
-    if (v.transactionDate !== t.transactionDate) patch.transactionDate = v.transactionDate;
-    if (Object.keys(patch).length === 0) {
-      formError.value = 'ยังไม่มีการเปลี่ยนแปลง';
-      return;
-    }
-    const r = transactionUpdateSchema.safeParse(patch);
-    if (!r.success) {
-      errors.value = formatZodError(r.error).fields;
-      return focusFirstError();
-    }
-    errors.value = {};
-    emit('update', t.id, patch as TransactionUpdateInput);
-    return;
+    category: form.category === '' ? null : form.category,
+    transaction_date: form.transaction_date,
   }
 
-  const input: TransactionCreateInput = {
-    ...v,
-    clientTimezone: clientTimeZone(),
-    idempotencyKey,
-  };
-  const r = transactionCreateSchema.safeParse(input);
-  if (!r.success) {
-    errors.value = formatZodError(r.error).fields;
-    return focusFirstError();
+  const { success, data, fieldErrors: errors } = validateTransactionInput(candidate)
+
+  if (!success || !data) {
+    fieldErrors.value = errors
+    return
   }
-  errors.value = {};
-  emit('create', input);
+
+  fieldErrors.value = {}
+  // ล็อกสั้น ๆ กันดับเบิลคลิก/ดับเบิลแท็ป ก่อนที่ prop busy จะกลายเป็น true
+  submitLocked.value = true
+  clearTimeout(unlockTimer)
+  unlockTimer = setTimeout(() => {
+    submitLocked.value = false
+  }, 800)
+
+  emit('submit', data satisfies TransactionInput)
 }
 
-/** เรียกจาก parent เมื่อบันทึกสำเร็จ → ล้างฟอร์ม + key ใหม่ */
-function reset() {
-  Object.assign(form, { ...blank(), type: form.type, transactionDate: form.transactionDate });
-  errors.value = {};
-  formError.value = '';
-  idempotencyKey = crypto.randomUUID();
-}
-
-function showError(message: string) {
-  formError.value = message;
-}
-
-defineExpose({ reset, showError, focus: () => formEl.value?.querySelector('input')?.focus() });
-
-const describedBy = (name: string, hint = false) =>
-  [hint ? id(`${name}-hint`) : '', errors.value[name] ? id(`${name}-error`) : '']
-    .filter(Boolean)
-    .join(' ') || undefined;
+onBeforeUnmount(() => clearTimeout(unlockTimer))
 </script>
 
 <template>
-  <form
-    ref="formEl"
-    class="card tx-form"
-    novalidate
-    :aria-labelledby="id('title')"
-    @submit.prevent="onSubmit"
-  >
-    <h2 :id="id('title')">{{ isEdit ? 'แก้ไขรายการ' : 'เพิ่มรายการ' }}</h2>
-
-    <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
-
-    <fieldset class="field type-toggle">
-      <legend>ประเภท</legend>
-      <label :class="{ active: form.type === 'expense' }">
-        <input v-model="form.type" type="radio" name="type" value="expense" />
-        รายจ่าย
-      </label>
-      <label :class="{ active: form.type === 'income' }">
-        <input v-model="form.type" type="radio" name="type" value="income" />
-        รายรับ
-      </label>
-    </fieldset>
-
-    <div class="field">
-      <label :for="id('description')">รายละเอียด</label>
-      <input
-        :id="id('description')"
-        v-model="form.description"
-        type="text"
-        maxlength="120"
-        autocomplete="off"
-        required
-        :aria-invalid="!!errors.description"
-        :aria-describedby="describedBy('description')"
-      />
-      <span v-if="errors.description" :id="id('description-error')" class="field-error">
-        {{ errors.description }}
-      </span>
-    </div>
-
-    <div class="row">
-      <div class="field">
-        <label :for="id('amount')">จำนวนเงิน (บาท)</label>
-        <input
-          :id="id('amount')"
-          v-model="form.amount"
-          type="number"
-          inputmode="numeric"
-          min="1"
-          step="1"
-          required
-          :aria-invalid="!!errors.amount"
-          :aria-describedby="describedBy('amount', true)"
-        />
-        <span :id="id('amount-hint')" class="field-hint">จำนวนเต็ม ไม่มีทศนิยม</span>
-        <span v-if="errors.amount" :id="id('amount-error')" class="field-error">
-          {{ errors.amount }}
-        </span>
+  <section class="panel form-panel">
+    <div class="panel-heading">
+      <div>
+        <span class="eyebrow">{{ isEditing ? 'แก้ไขข้อมูล' : 'รายการใหม่' }}</span>
+        <h2>{{ isEditing ? 'แก้ไขรายการ' : 'เพิ่มรายรับ–รายจ่าย' }}</h2>
       </div>
-
-      <div class="field">
-        <label :for="id('date')">วันที่</label>
-        <input
-          :id="id('date')"
-          v-model="form.transactionDate"
-          type="date"
-          min="1970-01-01"
-          required
-          :aria-invalid="!!errors.transactionDate"
-          :aria-describedby="describedBy('transactionDate')"
-        />
-        <span v-if="errors.transactionDate" :id="id('transactionDate-error')" class="field-error">
-          {{ errors.transactionDate }}
-        </span>
-      </div>
-    </div>
-
-    <div class="field">
-      <label :for="id('category')">หมวดหมู่ <span class="field-hint">(ไม่บังคับ)</span></label>
-      <select
-        :id="id('category')"
-        v-model="form.category"
-        :aria-invalid="!!errors.category"
-        :aria-describedby="describedBy('category')"
-      >
-        <option value="">ไม่ระบุ</option>
-        <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
-        <option
-          v-if="form.category && !(categories as readonly string[]).includes(form.category)"
-          :value="form.category"
-        >
-          {{ form.category }}
-        </option>
-      </select>
-      <span v-if="errors.category" :id="id('category-error')" class="field-error">
-        {{ errors.category }}
-      </span>
-    </div>
-
-    <div class="actions">
-      <button type="submit" class="btn" :disabled="submitting || (isEdit && disabled)">
-        {{ submitting ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : 'บันทึก' }}
-      </button>
-      <button v-if="isEdit" type="button" class="btn btn-secondary" @click="emit('cancel')">
+      <button v-if="isEditing" class="text-button" type="button" @click="emit('cancel')">
         ยกเลิก
       </button>
     </div>
-    <p v-if="isEdit && disabled" class="field-hint">แก้ไขได้เฉพาะตอนออนไลน์</p>
-  </form>
+
+    <form class="transaction-form" @submit.prevent="handleSubmit">
+      <fieldset :disabled="isBusy || disabled">
+        <label class="field field--wide">
+          <span>ชื่อรายการ</span>
+          <input
+            v-model="form.description"
+            type="text"
+            :maxlength="DESCRIPTION_MAX_LENGTH"
+            placeholder="เช่น ค่าอาหารกลางวัน"
+            required
+            :aria-invalid="Boolean(fieldErrors.description)"
+            :aria-describedby="fieldErrors.description ? 'form-error-description' : undefined"
+            @input="clearFieldError('description')"
+          />
+          <small
+            v-if="fieldErrors.description"
+            id="form-error-description"
+            class="field-error"
+            role="alert"
+          >
+            {{ fieldErrors.description }}
+          </small>
+        </label>
+
+        <label class="field">
+          <span>จำนวนเงิน (บาท)</span>
+          <input
+            v-model.number="form.amount"
+            type="number"
+            min="1"
+            step="1"
+            inputmode="numeric"
+            placeholder="0"
+            required
+            :aria-invalid="Boolean(fieldErrors.amount)"
+            :aria-describedby="fieldErrors.amount ? 'form-error-amount' : undefined"
+            @input="clearFieldError('amount')"
+          />
+          <small v-if="fieldErrors.amount" id="form-error-amount" class="field-error" role="alert">
+            {{ fieldErrors.amount }}
+          </small>
+        </label>
+
+        <label class="field">
+          <span>วันที่</span>
+          <span
+            class="date-input-wrap"
+            :class="{ 'date-input-wrap--invalid': Boolean(fieldErrors.transaction_date) }"
+          >
+            <input
+              v-model="form.transaction_date"
+              type="date"
+              required
+              :aria-invalid="Boolean(fieldErrors.transaction_date)"
+              :aria-describedby="fieldErrors.transaction_date ? 'form-error-date' : undefined"
+              @input="clearFieldError('transaction_date')"
+            />
+          </span>
+          <small
+            v-if="fieldErrors.transaction_date"
+            id="form-error-date"
+            class="field-error"
+            role="alert"
+          >
+            {{ fieldErrors.transaction_date }}
+          </small>
+        </label>
+
+        <div class="field field--wide">
+          <span>ประเภท</span>
+          <div class="type-switch">
+            <label :class="{ active: form.type === 'income' }">
+              <input v-model="form.type" type="radio" value="income" />
+              <span class="type-dot type-dot--income"></span>
+              รายรับ
+            </label>
+            <label :class="{ active: form.type === 'expense' }">
+              <input v-model="form.type" type="radio" value="expense" />
+              <span class="type-dot type-dot--expense"></span>
+              รายจ่าย
+            </label>
+          </div>
+        </div>
+
+        <div class="field field--wide category-field">
+          <div class="category-label">
+            <span>หมวดหมู่</span>
+            <small>{{ form.category ? 'กดซ้ำเพื่อยกเลิก' : 'ไม่บังคับ' }}</small>
+          </div>
+          <div class="category-grid" role="group" aria-label="เลือกหมวดหมู่">
+            <button
+              v-for="option in transactionCategories"
+              :key="option.value"
+              class="category-button"
+              :class="{ active: form.category === option.value }"
+              type="button"
+              :aria-pressed="form.category === option.value"
+              @click="toggleCategory(option.value)"
+            >
+              <span class="category-emoji" aria-hidden="true">{{ option.emoji }}</span>
+              <span>{{ option.value }}</span>
+              <i aria-hidden="true">✓</i>
+            </button>
+          </div>
+          <small v-if="fieldErrors.category" class="field-error" role="alert">
+            {{ fieldErrors.category }}
+          </small>
+        </div>
+
+        <button class="primary-button field--wide" type="submit" :disabled="isBusy || disabled">
+          <span v-if="isBusy" class="spinner" aria-hidden="true"></span>
+          {{ isBusy ? 'กำลังบันทึก...' : isEditing ? 'บันทึกการแก้ไข' : 'เพิ่มรายการ' }}
+        </button>
+      </fieldset>
+    </form>
+  </section>
 </template>
 
 <style scoped>
-.tx-form {
-  display: grid;
-  gap: 0.875rem;
+.field-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--alert-ink);
+  font-family: 'Noto Sans Thai', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 600;
+  line-height: 1.35;
 }
-.row {
-  display: grid;
-  gap: 0.875rem;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+
+/* ให้ขอบ input เปลี่ยนสีเมื่อ validate ไม่ผ่าน ไม่ใช่แค่ข้อความข้างล่าง */
+.field input[aria-invalid='true'] {
+  border-color: var(--alert-soft);
+  background: #fdf6f5;
 }
-.type-toggle {
-  border: 0;
-  padding: 0;
-  margin: 0;
+
+.category-field {
+  gap: 7px;
+}
+
+.category-label {
   display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.type-toggle legend {
-  margin-bottom: 0.25rem;
-}
-.type-toggle label {
-  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  min-height: 44px;
-  padding: 0.25rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
+  justify-content: space-between;
+  color: #515d57;
+  font-family: 'Noto Sans Thai', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.category-label small {
+  color: #99a19d;
+  font-size: 0.56rem;
   font-weight: 500;
 }
-.type-toggle label.active {
-  border-color: var(--primary);
-  background: #ecfdf5;
-  font-weight: 700;
+
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
-.type-toggle input {
-  width: 1.125rem;
-  height: 1.125rem;
-  accent-color: var(--primary);
-}
-.actions {
+
+.category-button {
+  position: relative;
   display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  overflow: hidden;
+  border: 1px solid #e0e5e1;
+  border-radius: 9px;
+  color: #5e6b64;
+  background: #fafbf9;
+  font-family: 'Noto Sans Thai', sans-serif;
+  font-size: 0.61rem;
+  font-weight: 600;
+  text-align: left;
+  transition:
+    border-color 0.16s,
+    background 0.16s,
+    color 0.16s,
+    transform 0.16s;
+}
+
+.category-button:hover:not(:disabled) {
+  border-color: #93aa9f;
+  background: #f3f7f4;
+  transform: translateY(-1px);
+}
+
+.category-button.active {
+  color: #1f5d40;
+  border-color: #5f987c;
+  background: #e8f4ed;
+  box-shadow: inset 0 0 0 1px rgba(51, 129, 91, 0.08);
+}
+
+.category-emoji {
+  flex: 0 0 auto;
+  font-size: 0.92rem;
+}
+
+.category-button > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-button i {
+  position: absolute;
+  right: 5px;
+  top: 4px;
+  color: #31805a;
+  font-size: 0.52rem;
+  font-style: normal;
+  opacity: 0;
+  transform: scale(0.5);
+  transition:
+    opacity 0.16s,
+    transform 0.16s;
+}
+
+.category-button.active i {
+  opacity: 1;
+  transform: scale(1);
 }
 </style>

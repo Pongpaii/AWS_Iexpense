@@ -1,39 +1,56 @@
-import { createApp } from 'vue';
-import App from './App.vue';
-import { ApiClientError } from './api/client';
-import { attachRouter } from './app-context';
-import { createAppRouter } from './router';
-import { showToast } from './stores/toast';
-import './styles/main.css';
+import { createApp, h } from 'vue'
+import App from './App.vue'
+import ErrorBoundary from './components/ErrorBoundary.vue'
+import { initializeAccentTone } from './composables/useAccentTone'
+import { initMonitoring, reportError } from './lib/monitoring'
+import '@fontsource/manrope/400.css'
+import '@fontsource/manrope/500.css'
+import '@fontsource/manrope/600.css'
+import '@fontsource/manrope/700.css'
+import '@fontsource/manrope/800.css'
+import '@fontsource/noto-sans-thai/400.css'
+import '@fontsource/noto-sans-thai/500.css'
+import '@fontsource/noto-sans-thai/600.css'
+import '@fontsource/noto-sans-thai/700.css'
+import './style.css'
 
-const app = createApp(App);
-const router = createAppRouter();
-attachRouter(router);
-app.use(router);
+// ทาสีที่ผู้ใช้เลือกไว้ก่อน Vue render เพื่อไม่ให้เห็นสีเริ่มต้นแวบหนึ่ง
+initializeAccentTone()
 
-/** global error handler: error ที่ไม่มีใครจับ → แจ้งผู้ใช้ (ไม่โชว์รายละเอียดภายใน) */
-function report(err: unknown) {
-  console.error(err);
-  const message =
-    err instanceof ApiClientError ? err.message : 'เกิดข้อผิดพลาดที่ไม่คาดคิด กรุณาลองใหม่';
-  showToast(message, { kind: 'error' });
+// ครอบ App ด้วย ErrorBoundary ที่ระดับ root: ถ้า component ไหนพังกลางทาง
+// ผู้ใช้จะเห็นการ์ดบอกวิธีแก้ ไม่ใช่หน้าจอขาวเปล่า ๆ
+const app = createApp({
+  name: 'MoneyFlowRoot',
+  render: () => h(ErrorBoundary, null, { default: () => h(App) }),
+})
+
+// onErrorCaptured จับได้แค่ error ที่เกิดในลูกของ boundary
+// errorHandler จับที่เหลือของ Vue
+app.config.errorHandler = (error, _instance, info) => {
+  console.error('[vue:error]', info, error)
+  reportError(error, { source: 'vue:errorHandler', info })
 }
-app.config.errorHandler = (err) => report(err);
-window.addEventListener('unhandledrejection', (e) => report(e.reason));
 
-// โหลด chunk ใหม่ไม่ได้ (เช่น deploy เวอร์ชันใหม่ระหว่างใช้งาน) → โหลดหน้าใหม่
-router.onError((err, to) => {
-  if (
-    /Failed to fetch dynamically imported module|Importing a module script failed/i.test(
-      String(err),
-    )
-  ) {
-    window.location.assign(to.fullPath);
-  } else report(err);
-});
+app.config.warnHandler = (message, _instance, trace) => {
+  if (import.meta.env.DEV) console.warn('[vue:warn]', message, trace)
+}
 
-app.mount('#app');
+// Promise ที่ reject ทิ้งไว้ไม่ผ่าน Vue จึงต้องดักแยก
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[unhandledrejection]', event.reason)
+  reportError(event.reason, { source: 'unhandledrejection' })
+})
 
+window.addEventListener('error', (event) => {
+  reportError(event.error ?? event.message, { source: 'window:error' })
+})
+
+// ไม่ await: monitoring เป็นของเสริม อย่าให้การแสดงหน้าจอต้องรอ network
+void initMonitoring(app)
+
+app.mount('#app')
+
+// register ผ่าน virtual module (ไม่ใช้ inline script) เพื่อให้ CSP script-src 'self' ใช้ได้
 if (import.meta.env.PROD) {
-  void import('virtual:pwa-register').then(({ registerSW }) => registerSW({ immediate: true }));
+  void import('virtual:pwa-register').then(({ registerSW }) => registerSW({ immediate: true }))
 }

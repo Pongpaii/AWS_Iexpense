@@ -349,6 +349,58 @@ export const dailyCapInputSchema = z
   )
   .transform((c) => ({ ...c, subPlans: sortByCategoryPriority(c.subPlans, (p) => p.category) }));
 
+/* ---------- แผนงบรายวันแบบละเอียด (UI เดิม: วันทำงาน/วันหยุด + ช่องย่อย) ---------- */
+
+export const MAX_DAILY_CAP_PLAN_AMOUNT = 1_000_000;
+export const MAX_DAILY_CAP_PLAN_ITEMS = 10;
+
+const planAmount = z
+  .number({ error: 'จำนวนเงินในแผนต้องเป็นตัวเลข' })
+  .refine(Number.isFinite, { error: 'จำนวนเงินในแผนต้องเป็นตัวเลข', abort: true })
+  .min(0, { error: 'จำนวนเงินในแผนต้องไม่ติดลบ' })
+  .max(MAX_DAILY_CAP_PLAN_AMOUNT, { error: 'จำนวนเงินในแผนสูงเกินไป' });
+
+const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, { error: 'เวลาต้องเป็น HH:mm' });
+
+const dailyCapPlanItemSchema = z.strictObject(
+  {
+    id: z.string().min(1).max(48),
+    emoji: z.string().max(16),
+    label: z.string().max(24),
+    amount: planAmount,
+    keywords: z.array(z.string().max(24)).max(8),
+    timeWindow: z.strictObject({ start: timeOfDay, end: timeOfDay }).nullable(),
+    category: z.string().max(60).nullable(),
+  },
+  { error: strictKeysError },
+);
+
+const dailyCapPlanProfileSchema = z.strictObject(
+  {
+    cap: planAmount.refine((v) => v > 0, { error: 'เพดานรายวันต้องมากกว่า 0' }),
+    items: z
+      .array(dailyCapPlanItemSchema)
+      .max(MAX_DAILY_CAP_PLAN_ITEMS, { error: 'แผนย่อยได้ไม่เกิน 10 รายการ' }),
+  },
+  { error: strictKeysError },
+);
+
+/**
+ * แผนงบรายวันของหน้าจอ Money Flow: โปรไฟล์วันทำงาน/วันหยุด แต่ละโปรไฟล์มีช่องย่อย
+ * (เช่น เช้า/กลางวัน/เย็น) ที่จับคู่รายการด้วยหมวด คำค้น และช่วงเวลา
+ * null = ผู้ใช้ยังไม่เคยบันทึก (client ใช้ค่าเริ่มต้น)
+ */
+export const dailyCapPlanSchema = z.strictObject(
+  {
+    enabled: z.boolean(),
+    weekday: dailyCapPlanProfileSchema,
+    weekend: dailyCapPlanProfileSchema,
+    excludedCategories: z.array(z.string().max(60)).max(20),
+  },
+  { error: strictKeysError },
+);
+export type DailyCapPlan = z.output<typeof dailyCapPlanSchema>;
+
 /** PUT /settings — แทนที่ทั้งก้อน; field ที่ไม่ส่งจะใช้ค่า default */
 export const settingsInputSchema = z
   .strictObject(
@@ -373,6 +425,7 @@ export const settingsInputSchema = z
         })
         .prefault({}),
       heatmapExcludedCategories: excludedCategoriesSchema,
+      dailyCapPlan: dailyCapPlanSchema.nullable().default(null),
     },
     { error: strictKeysError },
   )
@@ -397,6 +450,8 @@ export const settingsSchema = z.object({
   expenseColor: z.enum(EXPENSE_COLORS),
   dailyReminder: z.object({ enabled: z.boolean(), time: z.string() }),
   heatmapExcludedCategories: z.array(z.string()),
+  // optional: item ที่บันทึกก่อนมี field นี้ (หรือ API เวอร์ชันเก่า) จะได้ null
+  dailyCapPlan: dailyCapPlanSchema.nullable().default(null),
   updatedAt: isoDateTime.nullable(),
 });
 export type UserSettings = z.output<typeof settingsSchema>;

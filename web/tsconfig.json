@@ -3,7 +3,11 @@
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "jsx": "preserve",
-    "types": ["vite/client", "node"]
+    "types": ["vite/client"],
+    // โค้ดหน้าจอยกมาจากแอปเดิมซึ่งตั้งค่า strict แบบ @vue/tsconfig (ไม่เปิด noUncheckedIndexedAccess)
+    "noUncheckedIndexedAccess": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "test/**/*.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts", "capacitor.config.ts"]
 }

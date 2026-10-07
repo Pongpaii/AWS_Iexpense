@@ -44,5 +44,13 @@ export default defineConfig(
       eqeqeq: ['error', 'always'],
     },
   },
+  {
+    // หน้าจอยกมาจากแอป Money Flow เดิม: ใช้ `x != null` (เช็คทั้ง null/undefined) เป็นแบบแผน
+    files: ['web/src/**/*.{ts,vue}'],
+    rules: {
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
+      'vue/multi-word-component-names': 'off',
+    },
+  },
   prettier,
 );

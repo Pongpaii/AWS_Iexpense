@@ -1,308 +1,511 @@
 <script setup lang="ts">
-import { formatBaht, type Transaction } from '@money-flow/shared';
-import { computed, ref, watch } from 'vue';
-import { formatThaiDate } from '../lib/date';
-import type { OutboxEntry } from '../offline/outbox';
+import { computed, ref, watch } from 'vue'
+import { getCategoryEmoji, type Transaction } from '../types/transaction'
+import { formatBaht, formatDate } from '../utils/format'
 
-/** จำนวนแถวที่ render ต่อครั้ง (ลด DOM เมื่อมีรายการมาก) */
-const RENDER_CHUNK = 50;
-
-const props = defineProps<{
-  items: readonly Transaction[];
-  pending: readonly OutboxEntry[];
-  online: boolean;
-  loading: boolean;
-  loadingMore: boolean;
-  hasMore: boolean;
-  busy?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    transactions: Transaction[]
+    loading: boolean
+    busyId: string | null
+    selectionMode: boolean
+    bulkBusy: boolean
+    emptyHint: string
+    readOnly?: boolean
+    /** จำนวนแถวที่วาดต่อหนึ่งหน้า ตั้งเป็น 0 เพื่อวาดทั้งหมด */
+    pageSize?: number
+  }>(),
+  { readOnly: false, pageSize: 50 },
+)
 
 const emit = defineEmits<{
-  edit: [t: Transaction];
-  remove: [t: Transaction];
-  bulkRemove: [ids: string[]];
-  loadMore: [];
-  discardPending: [key: string];
-}>();
+  edit: [transaction: Transaction]
+  delete: [transaction: Transaction]
+  bulkDelete: [ids: string[]]
+  cancelSelection: []
+}>()
 
-const visible = ref(RENDER_CHUNK);
-const selected = ref(new Set<string>());
-const selecting = ref(false);
+const selectedIds = ref<string[]>([])
 
-// เปลี่ยนเดือน (items ถูกแทนทั้งชุด) → เริ่มนับใหม่และล้างการเลือก
+/**
+ * วาดทีละหน้าเพื่อไม่ให้ DOM บวมเมื่อประวัติยาวเป็นพันแถว
+ * ข้อมูลทั้งหมดยังอยู่ใน props ครบ (ยอดสรุปจึงถูกต้อง) แค่จำกัดจำนวนที่ render
+ */
+const visibleCount = ref(props.pageSize > 0 ? props.pageSize : Number.POSITIVE_INFINITY)
+
+const visibleTransactions = computed(() =>
+  Number.isFinite(visibleCount.value)
+    ? props.transactions.slice(0, visibleCount.value)
+    : props.transactions,
+)
+
+const hiddenCount = computed(() =>
+  Math.max(0, props.transactions.length - visibleTransactions.value.length),
+)
+
+const showMore = () => {
+  const step = props.pageSize > 0 ? props.pageSize : props.transactions.length
+  visibleCount.value = Math.min(visibleCount.value + step, props.transactions.length)
+}
+
+const resetVisibleCount = () => {
+  visibleCount.value = props.pageSize > 0 ? props.pageSize : Number.POSITIVE_INFINITY
+}
+
+const allSelected = computed(
+  () => props.transactions.length > 0 && selectedIds.value.length === props.transactions.length,
+)
+
+const isSelected = (id: string) => selectedIds.value.includes(id)
+
+const toggleSelection = (id: string) => {
+  selectedIds.value = isSelected(id)
+    ? selectedIds.value.filter((selectedId) => selectedId !== id)
+    : [...selectedIds.value, id]
+}
+
+const toggleAll = () => {
+  selectedIds.value = allSelected.value ? [] : props.transactions.map(({ id }) => id)
+}
+
+const requestBulkDelete = () => {
+  if (selectedIds.value.length === 0) return
+  emit('bulkDelete', [...selectedIds.value])
+}
+
 watch(
-  () => props.items.length === 0,
-  (empty) => {
-    if (empty) {
-      visible.value = RENDER_CHUNK;
-      selected.value = new Set();
+  () => props.selectionMode,
+  (enabled) => {
+    if (!enabled) selectedIds.value = []
+    // เข้า/ออกโหมดเลือก ชุดข้อมูลที่แสดงเปลี่ยนไปคนละชุด เริ่มนับหน้าใหม่
+    resetVisibleCount()
+  },
+)
+
+watch(
+  () => props.transactions,
+  (transactions) => {
+    const availableIds = new Set(transactions.map(({ id }) => id))
+    selectedIds.value = selectedIds.value.filter((id) => availableIds.has(id))
+
+    // คงจำนวนที่ผู้ใช้กดขยายไว้ แต่ไม่ให้เกินจำนวนที่มีจริง
+    if (Number.isFinite(visibleCount.value)) {
+      const floor = props.pageSize > 0 ? props.pageSize : transactions.length
+      visibleCount.value = Math.max(floor, Math.min(visibleCount.value, transactions.length))
     }
   },
-);
-watch(
-  () => props.items,
-  (items) => {
-    const ids = new Set(items.map((t) => t.id));
-    const next = new Set([...selected.value].filter((id) => ids.has(id)));
-    if (next.size !== selected.value.size) selected.value = next;
-  },
-);
-
-const shown = computed(() => props.items.slice(0, visible.value));
-const canShowMore = computed(() => visible.value < props.items.length || props.hasMore);
-const allShownSelected = computed(
-  () => shown.value.length > 0 && shown.value.every((t) => selected.value.has(t.id)),
-);
-
-function showMore() {
-  if (visible.value + RENDER_CHUNK > props.items.length && props.hasMore) emit('loadMore');
-  visible.value += RENDER_CHUNK;
-}
-
-function toggle(id: string) {
-  const next = new Set(selected.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  selected.value = next;
-}
-
-function toggleAll() {
-  selected.value = allShownSelected.value ? new Set() : new Set(shown.value.map((t) => t.id));
-}
-
-function exitSelecting() {
-  selecting.value = false;
-  selected.value = new Set();
-}
-
-function bulkRemove() {
-  emit('bulkRemove', [...selected.value]);
-  exitSelecting();
-}
-
-const amountText = (t: { type: string; amount: number }) =>
-  `${t.type === 'income' ? '+' : '−'}${formatBaht(t.amount)}`;
+)
 </script>
 
 <template>
-  <section class="card list" aria-labelledby="tx-list-title">
-    <div class="list-head">
-      <h2 id="tx-list-title">รายการ</h2>
-      <div class="head-actions">
-        <template v-if="selecting">
-          <button type="button" class="btn btn-secondary" @click="toggleAll">
-            {{ allShownSelected ? 'ไม่เลือกทั้งหมด' : 'เลือกทั้งหมด' }}
-          </button>
-          <button
-            type="button"
-            class="btn btn-danger"
-            :disabled="selected.size === 0 || !online || busy"
-            @click="bulkRemove"
-          >
-            ลบที่เลือก ({{ selected.size }})
-          </button>
-          <button type="button" class="btn btn-secondary" @click="exitSelecting">ยกเลิก</button>
-        </template>
+  <section class="panel list-panel" :class="{ 'list-panel--selecting': selectionMode }">
+    <div class="panel-heading list-heading">
+      <div>
+        <span class="eyebrow">{{ selectionMode ? 'จัดการข้อมูล' : 'ประวัติ' }}</span>
+        <h2>{{ selectionMode ? `เลือกแล้ว ${selectedIds.length} รายการ` : 'รายการล่าสุด' }}</h2>
+      </div>
+
+      <div v-if="selectionMode" class="selection-tools">
+        <button class="select-all-button" type="button" :disabled="bulkBusy" @click="toggleAll">
+          {{ allSelected ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด' }}
+        </button>
         <button
-          v-else
+          class="cancel-select-button"
           type="button"
-          class="btn btn-secondary"
-          :disabled="items.length === 0 || !online"
-          @click="selecting = true"
+          :disabled="bulkBusy"
+          @click="emit('cancelSelection')"
         >
-          เลือกหลายรายการ
+          เสร็จสิ้น
         </button>
       </div>
+      <div v-else class="list-meta">
+        <span v-if="readOnly" class="read-only-chip">ดูอย่างเดียว</span>
+        <span class="item-count">{{ transactions.length }} รายการ</span>
+      </div>
     </div>
-    <p v-if="!online" class="field-hint">ออฟไลน์: เพิ่มรายการได้ แต่แก้ไข/ลบได้เมื่อออนไลน์</p>
 
-    <!-- รายการที่รอซิงก์ (บันทึกตอนออฟไลน์) -->
-    <ul v-if="pending.length" class="rows" aria-label="รายการที่รอซิงก์">
-      <li v-for="p in pending" :key="p.idempotencyKey" class="row pending">
-        <div class="main">
-          <span class="desc">{{ p.input.description }}</span>
-          <span class="meta">
-            {{ formatThaiDate(p.input.transactionDate) }}
-            <span v-if="p.input.category"> · {{ p.input.category }}</span>
-            ·
-            <strong v-if="p.status === 'failed'" class="failed">
-              ซิงก์ไม่สำเร็จ: {{ p.error }}
-            </strong>
-            <span v-else class="badge">รอซิงก์</span>
-          </span>
-        </div>
-        <span class="amount" :class="`amount-${p.input.type}`">{{ amountText(p.input) }}</span>
-        <button
-          type="button"
-          class="btn btn-link"
-          :aria-label="`ยกเลิกรายการที่รอซิงก์ ${p.input.description}`"
-          @click="emit('discardPending', p.idempotencyKey)"
-        >
-          ทิ้ง
-        </button>
+    <div v-if="selectionMode && transactions.length > 0" class="selection-bar">
+      <span>แตะช่องด้านซ้ายเพื่อเลือกรายการ</span>
+      <button
+        type="button"
+        :disabled="selectedIds.length === 0 || bulkBusy"
+        @click="requestBulkDelete"
+      >
+        <span v-if="bulkBusy" class="spinner spinner--small" aria-hidden="true"></span>
+        {{ bulkBusy ? 'กำลังลบ...' : `ลบที่เลือก (${selectedIds.length})` }}
+      </button>
+    </div>
+
+    <ul v-if="loading" class="transaction-skeleton" role="status" aria-label="กำลังโหลดรายการ">
+      <li v-for="row in 5" :key="row">
+        <span class="skeleton skeleton--circle" style="width: 36px; height: 36px"></span>
+        <span class="transaction-skeleton__copy">
+          <span class="skeleton skeleton--text" :style="{ width: `${68 - row * 5}%` }"></span>
+          <span class="skeleton skeleton--text" style="width: 34%; height: 8px"></span>
+        </span>
+        <span class="skeleton skeleton--text" style="width: 58px"></span>
       </li>
     </ul>
 
-    <div v-if="loading" aria-busy="true" class="rows">
-      <span class="visually-hidden">กำลังโหลดรายการ</span>
-      <span v-for="n in 4" :key="n" class="skeleton row-skeleton" />
+    <div v-else-if="transactions.length === 0" class="state-box">
+      <div class="empty-icon" aria-hidden="true">₿</div>
+      <h3>ยังไม่มีรายการ</h3>
+      <p>{{ emptyHint }}</p>
     </div>
 
-    <p v-else-if="items.length === 0 && pending.length === 0" class="empty">
-      ยังไม่มีรายการในเดือนนี้
-    </p>
-
-    <ul v-else class="rows">
+    <TransitionGroup v-else tag="ul" name="transaction" class="transaction-list">
       <li
-        v-for="t in shown"
-        :key="t.id"
-        class="row"
-        :class="{ selected: selected.has(t.id) }"
-        data-testid="tx-row"
+        v-for="transaction in visibleTransactions"
+        :key="transaction.id"
+        class="transaction-item"
+        :class="{
+          'transaction-item--selecting': selectionMode,
+          'is-selected': isSelected(transaction.id),
+        }"
+        @click="selectionMode && toggleSelection(transaction.id)"
       >
-        <label v-if="selecting" class="check">
-          <input type="checkbox" :checked="selected.has(t.id)" @change="toggle(t.id)" />
-          <span class="visually-hidden">เลือก {{ t.description }}</span>
+        <label v-if="selectionMode" class="select-checkbox" @click.stop>
+          <input
+            type="checkbox"
+            :checked="isSelected(transaction.id)"
+            :aria-label="`เลือก ${transaction.description}`"
+            :disabled="bulkBusy"
+            @change="toggleSelection(transaction.id)"
+          />
+          <span aria-hidden="true">✓</span>
         </label>
-        <div class="main">
-          <span class="desc">{{ t.description }}</span>
-          <span class="meta">
-            {{ formatThaiDate(t.transactionDate) }}
-            <span v-if="t.category"> · {{ t.category }}</span>
+
+        <div
+          class="transaction-icon"
+          :class="`transaction-icon--${transaction.type}`"
+          aria-hidden="true"
+        >
+          {{ transaction.type === 'income' ? '↗' : '↘' }}
+        </div>
+
+        <div class="transaction-info">
+          <strong>{{ transaction.description }}</strong>
+          <span>
+            {{ formatDate(transaction.transaction_date) }}
+            <template v-if="transaction.category">
+              · {{ getCategoryEmoji(transaction.category) }} {{ transaction.category }}
+            </template>
           </span>
         </div>
-        <span class="amount" :class="`amount-${t.type}`">
-          <span class="visually-hidden">{{ t.type === 'income' ? 'รายรับ' : 'รายจ่าย' }}</span>
-          {{ amountText(t) }}
-        </span>
-        <div v-if="!selecting" class="row-actions">
+
+        <div class="transaction-amount" :class="`amount--${transaction.type}`">
+          <strong>
+            {{ transaction.type === 'income' ? '+' : '−' }}{{ formatBaht(transaction.amount) }}
+          </strong>
+          <span>{{ transaction.type === 'income' ? 'รายรับ' : 'รายจ่าย' }}</span>
+        </div>
+
+        <div v-if="!selectionMode && !readOnly" class="transaction-actions">
           <button
+            class="icon-button"
             type="button"
-            class="btn btn-secondary"
-            :disabled="!online || busy"
-            :aria-label="`แก้ไข ${t.description}`"
-            @click="emit('edit', t)"
+            title="แก้ไขรายการ"
+            :disabled="busyId === transaction.id"
+            @click="emit('edit', transaction)"
           >
             แก้ไข
           </button>
           <button
+            class="icon-button icon-button--danger"
             type="button"
-            class="btn btn-secondary"
-            :disabled="!online || busy"
-            :aria-label="`ลบ ${t.description}`"
-            @click="emit('remove', t)"
+            title="ลบรายการ"
+            :disabled="busyId === transaction.id"
+            @click="emit('delete', transaction)"
           >
-            ลบ
+            {{ busyId === transaction.id ? 'กำลังลบ' : 'ลบ' }}
           </button>
         </div>
       </li>
-    </ul>
+    </TransitionGroup>
 
-    <div v-if="!loading && canShowMore" class="more">
-      <button type="button" class="btn btn-secondary" :disabled="loadingMore" @click="showMore">
-        {{ loadingMore ? 'กำลังโหลด…' : 'แสดงเพิ่ม' }}
-      </button>
-    </div>
+    <button
+      v-if="!loading && hiddenCount > 0"
+      class="load-more-button"
+      type="button"
+      @click="showMore"
+    >
+      โหลดเพิ่ม
+      <small>เหลืออีก {{ hiddenCount }} รายการ</small>
+    </button>
   </section>
 </template>
 
 <style scoped>
-.list {
-  display: grid;
-  gap: 0.5rem;
-}
-.list-head {
+.list-panel {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  min-height: 0;
+  flex-direction: column;
 }
-.list-head h2 {
-  margin: 0;
+
+.list-panel .transaction-list {
+  position: relative;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: #c9d5ce transparent;
 }
-.head-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-}
-.row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.625rem 0;
-  border-bottom: 1px solid #e5e7eb;
-}
-.row.selected {
-  background: #eff6ff;
-}
-.row.pending {
-  background: var(--warning-bg);
-  padding-inline: 0.5rem;
-  border-radius: 0.375rem;
-}
-.check input {
-  width: 1.375rem;
-  height: 1.375rem;
-}
-.main {
+
+.list-panel .state-box {
   flex: 1;
-  min-width: 0;
+}
+
+.transaction-skeleton {
   display: grid;
+  gap: 18px;
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
 }
-.desc {
-  font-weight: 600;
-  overflow-wrap: anywhere;
+
+.transaction-skeleton li {
+  display: grid;
+  align-items: center;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 11px;
 }
-.meta {
-  color: var(--muted);
-  font-size: 0.875rem;
+
+.transaction-skeleton__copy {
+  display: grid;
+  gap: 6px;
 }
-.badge {
-  color: var(--warning-text);
-  font-weight: 600;
-}
-.failed {
-  color: var(--danger);
-}
-.amount {
+
+.load-more-button {
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px dashed #cfdad4;
+  border-radius: 10px;
+  color: #2f6b50;
+  background: #f7faf8;
+  font-family: 'Noto Sans Thai', sans-serif;
+  font-size: 0.67rem;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    border-color 0.16s,
+    background 0.16s;
+}
+
+.load-more-button:hover {
+  border-color: #93aa9f;
+  background: #eef5f1;
+}
+
+.load-more-button:focus-visible {
+  outline: 3px solid rgba(47, 129, 92, 0.35);
+  outline-offset: 2px;
+}
+
+.load-more-button small {
+  color: #8b968f;
+  font-size: 0.55rem;
+  font-weight: 600;
+}
+
+.list-heading {
+  align-items: center;
+}
+
+.list-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.read-only-chip {
+  padding: 4px 8px;
+  border: 1px solid var(--cheer-line);
+  border-radius: 999px;
+  color: var(--cheer-text);
+  background: var(--cheer-tint);
+  font-family: 'Noto Sans Thai', sans-serif;
+  font-size: 0.55rem;
+  font-weight: 700;
   white-space: nowrap;
 }
-.row-actions {
+
+.selection-tools {
   display: flex;
-  gap: 0.25rem;
+  align-items: center;
+  gap: 6px;
 }
-.row-actions .btn {
-  padding-inline: 0.75rem;
+
+.selection-tools button,
+.selection-bar button {
+  border-radius: 8px;
+  font-family: 'Noto Sans Thai', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
 }
-.row-skeleton {
-  height: 3rem;
-  margin-block: 0.25rem;
+
+.select-all-button,
+.cancel-select-button {
+  padding: 7px 9px;
+  border: 1px solid #d7dfda;
+  color: #50655b;
+  background: #fff;
 }
-.empty {
-  color: var(--muted);
-  text-align: center;
-  padding: 1.5rem 0;
+
+.cancel-select-button {
+  color: #256347;
+  background: #edf5f0;
 }
-.more {
+
+.selection-bar {
   display: flex;
-  justify-content: center;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: -7px 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: #65736c;
+  background: #f2f6f3;
+  font-family: 'Noto Sans Thai', sans-serif;
+  font-size: 0.65rem;
 }
-@media (max-width: 30rem) {
-  .row {
-    flex-wrap: wrap;
+
+.selection-bar button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 0;
+  color: white;
+  background: var(--alert);
+}
+
+.spinner--small {
+  width: 12px;
+  height: 12px;
+}
+
+.transaction-item--selecting {
+  grid-template-columns: 25px 42px minmax(110px, 1fr) auto;
+  margin-inline: -8px;
+  padding-inline: 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.transaction-item--selecting.is-selected {
+  background: #f0f7f3;
+}
+
+.select-checkbox {
+  position: relative;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  cursor: pointer;
+}
+
+.select-checkbox input {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.select-checkbox span {
+  display: grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border: 1.5px solid #bdc9c2;
+  border-radius: 6px;
+  color: transparent;
+  background: white;
+  font-size: 0.65rem;
+  font-weight: 800;
+  transition: all 0.15s;
+}
+
+.select-checkbox input:checked + span {
+  color: white;
+  border-color: #2f815c;
+  background: #2f815c;
+}
+
+.transaction-enter-active,
+.transaction-leave-active,
+.transaction-move {
+  transition:
+    opacity 0.25s ease,
+    transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.transaction-enter-from {
+  opacity: 0;
+  transform: translateX(-12px) scale(0.98);
+}
+
+.transaction-leave-to {
+  opacity: 0;
+  transform: translateX(16px) scale(0.97);
+}
+
+.transaction-leave-active {
+  position: absolute;
+  width: calc(100% - 36px);
+}
+
+.transaction-item:not(.transaction-item--selecting) {
+  transition:
+    background 0.18s ease,
+    transform 0.18s ease;
+}
+
+.transaction-item:not(.transaction-item--selecting):hover {
+  padding-inline: 7px;
+  border-radius: 10px;
+  background: #f6f9f7;
+  transform: translateX(2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transaction-enter-active,
+  .transaction-leave-active,
+  .transaction-move,
+  .transaction-item {
+    transition: none !important;
   }
-  .row-actions {
-    width: 100%;
-    justify-content: flex-end;
+}
+
+@media (max-width: 580px) {
+  .list-heading {
+    align-items: flex-start;
+  }
+  .selection-tools {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+  .selection-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .selection-bar button {
+    justify-content: center;
+  }
+  .transaction-item--selecting {
+    grid-template-columns: 24px 40px minmax(90px, 1fr) auto;
   }
 }
 </style>
