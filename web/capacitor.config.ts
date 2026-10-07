@@ -1,4 +1,4 @@
-import type { CapacitorConfig } from '@capacitor/cli';
+import type { CapacitorConfig } from '@capacitor/cli'
 
 /**
  * Android ผ่าน Capacitor — แอปโหลดไฟล์จาก dist/ ในเครื่อง (origin = https://localhost)
@@ -20,6 +20,6 @@ const config: CapacitorConfig = {
       iconColor: '#0f766e',
     },
   },
-};
+}
 
-export default config;
+export default config

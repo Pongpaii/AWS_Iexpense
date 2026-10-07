@@ -1,82 +1,83 @@
 <script setup lang="ts">
-import { formatBaht, type Balance, type MonthlySummary } from '@money-flow/shared';
-import { computed } from 'vue';
-import { formatThaiMonth } from '../lib/date';
+import { formatBaht } from '../utils/format'
 
-const props = defineProps<{
-  balance: Balance | null;
-  monthly: MonthlySummary | null;
-  month: string;
-  loading: boolean;
-}>();
-
-const cards = computed(() => [
+withDefaults(
+  defineProps<{
+    balance: number
+    income: number
+    expense: number
+    balanceLabel?: string
+    incomeLabel?: string
+    expenseLabel?: string
+    /** true = ยังโหลดข้อมูลไม่เสร็จ ให้แสดงโครงแทนเลข 0 ที่จะทำให้เข้าใจผิด */
+    loading?: boolean
+  }>(),
   {
-    key: 'balance',
-    label: 'ยอดคงเหลือ',
-    sub: 'ทั้งหมด',
-    value: props.balance?.balance,
-    cls: (props.balance?.balance ?? 0) < 0 ? 'amount-expense' : '',
+    balanceLabel: 'ยอดคงเหลือ',
+    incomeLabel: 'รายรับ',
+    expenseLabel: 'รายจ่าย',
+    loading: false,
   },
-  {
-    key: 'income',
-    label: 'รายรับ',
-    sub: formatThaiMonth(props.month),
-    value: props.monthly?.income,
-    cls: 'amount-income',
-  },
-  {
-    key: 'expense',
-    label: 'รายจ่าย',
-    sub: formatThaiMonth(props.month),
-    value: props.monthly?.expense,
-    cls: 'amount-expense',
-  },
-]);
+)
 </script>
 
 <template>
-  <section aria-labelledby="summary-title" :aria-busy="loading">
-    <h2 id="summary-title" class="visually-hidden">สรุปยอด</h2>
-    <ul class="cards">
-      <li v-for="c in cards" :key="c.key" class="card summary-card" :data-testid="`card-${c.key}`">
-        <span class="label">{{ c.label }}</span>
-        <span class="sub">{{ c.sub }}</span>
-        <span v-if="loading || c.value === undefined" class="skeleton value-skeleton">
-          <span class="visually-hidden">กำลังโหลด</span>
-        </span>
-        <strong v-else class="value" :class="c.cls">{{ formatBaht(c.value) }}</strong>
-      </li>
-    </ul>
+  <section
+    v-if="loading"
+    class="summary-grid"
+    role="status"
+    aria-label="กำลังโหลดสรุปยอดเงิน"
+    aria-live="polite"
+  >
+    <article v-for="card in 3" :key="card" class="summary-card summary-card--skeleton">
+      <div class="skeleton skeleton--circle summary-skeleton__icon"></div>
+      <div class="summary-skeleton__copy">
+        <span class="skeleton skeleton--text" style="width: 72px"></span>
+        <span class="skeleton skeleton--title" style="width: 108px"></span>
+      </div>
+    </article>
+  </section>
+
+  <section v-else class="summary-grid" aria-label="สรุปยอดเงิน">
+    <article class="summary-card summary-card--balance">
+      <div class="summary-card__icon" aria-hidden="true">฿</div>
+      <div>
+        <p>{{ balanceLabel }}</p>
+        <strong>{{ formatBaht(balance) }}</strong>
+      </div>
+    </article>
+
+    <article class="summary-card summary-card--income">
+      <div class="summary-card__icon" aria-hidden="true">↗</div>
+      <div>
+        <p>{{ incomeLabel }}</p>
+        <strong>{{ formatBaht(income) }}</strong>
+      </div>
+    </article>
+
+    <article class="summary-card summary-card--expense">
+      <div class="summary-card__icon" aria-hidden="true">↘</div>
+      <div>
+        <p>{{ expenseLabel }}</p>
+        <strong>{{ formatBaht(expense) }}</strong>
+      </div>
+    </article>
   </section>
 </template>
 
 <style scoped>
-.cards {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.summary-card--skeleton {
+  align-items: center;
+}
+
+.summary-skeleton__icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+}
+
+.summary-skeleton__copy {
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-}
-.summary-card {
-  display: grid;
-  gap: 0.125rem;
-}
-.label {
-  font-weight: 600;
-}
-.sub {
-  color: var(--muted);
-  font-size: 0.875rem;
-}
-.value {
-  font-size: 1.5rem;
-  font-variant-numeric: tabular-nums;
-}
-.value-skeleton {
-  height: 2.25rem;
-  width: 70%;
+  gap: 8px;
 }
 </style>
