@@ -2,10 +2,13 @@ import { Amplify } from 'aws-amplify'
 import {
   confirmResetPassword,
   confirmSignIn,
+  confirmSignUp,
   fetchAuthSession,
+  resendSignUpCode,
   resetPassword,
   signIn,
   signOut,
+  signUp,
 } from 'aws-amplify/auth'
 import type { AppConfig } from './config'
 
@@ -55,6 +58,30 @@ function mapStep(step: string): LoginStep {
 export async function logout(): Promise<void> {
   // global: เพิกถอน refresh token ที่ Cognito ด้วย (token revocation เปิดไว้ใน AuthStack)
   await signOut({ global: true }).catch(() => signOut())
+}
+
+export type SignUpStep = 'CONFIRM_SIGN_UP' | 'DONE'
+
+/**
+ * สมัครสมาชิกเอง: Cognito สร้างบัญชีสถานะ UNCONFIRMED แล้วส่งรหัสยืนยันทางอีเมล
+ * ต้อง confirmRegistration ก่อนจึงจะ login ได้
+ */
+export async function register(email: string, password: string): Promise<SignUpStep> {
+  const username = email.trim().toLowerCase()
+  const res = await signUp({
+    username,
+    password,
+    options: { userAttributes: { email: username } },
+  })
+  return res.nextStep.signUpStep === 'CONFIRM_SIGN_UP' ? 'CONFIRM_SIGN_UP' : 'DONE'
+}
+
+export async function confirmRegistration(email: string, code: string): Promise<void> {
+  await confirmSignUp({ username: email.trim().toLowerCase(), confirmationCode: code.trim() })
+}
+
+export async function resendRegistrationCode(email: string): Promise<void> {
+  await resendSignUpCode({ username: email.trim().toLowerCase() })
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {
@@ -108,9 +135,23 @@ export function authErrorMessage(err: unknown): string {
     case 'PasswordResetRequiredException':
       return 'ต้องตั้งรหัสผ่านใหม่ก่อน กรุณาใช้ "ลืมรหัสผ่าน"'
     case 'UserNotConfirmedException':
-      return 'บัญชียังไม่ได้รับการยืนยัน กรุณาติดต่อผู้ดูแล'
+      return 'บัญชียังไม่ได้ยืนยันอีเมล กรุณากรอกรหัสยืนยันที่ส่งไปทางอีเมล'
+    case 'UsernameExistsException':
+      return 'อีเมลนี้มีบัญชีอยู่แล้ว กรุณาเข้าสู่ระบบหรือใช้ "ลืมรหัสผ่าน"'
+    case 'InvalidParameterException':
+      return 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบอีเมลและรหัสผ่าน'
+    case 'CodeDeliveryFailureException':
+      return 'ส่งอีเมลรหัสยืนยันไม่สำเร็จ กรุณาลองใหม่ภายหลัง'
+    case 'EmptySignUpUsername':
+    case 'EmptyConfirmSignUpUsername':
+    case 'EmptyResendSignUpCodeUsername':
+      return 'กรุณากรอกอีเมล'
+    case 'EmptySignUpPassword':
+      return 'กรุณากรอกรหัสผ่าน'
+    case 'EmptyConfirmSignUpCode':
+      return 'กรุณากรอกรหัสยืนยัน'
     case 'InvalidPasswordException':
-      return 'รหัสผ่านไม่ตรงตามเงื่อนไข (อย่างน้อย 10 ตัว มีตัวพิมพ์ใหญ่ ตัวพิมพ์เล็ก และตัวเลข)'
+      return 'รหัสผ่านไม่ตรงตามเงื่อนไข (อย่างน้อย 6 ตัวอักษร)'
     case 'CodeMismatchException':
       return 'รหัสยืนยันไม่ถูกต้อง'
     case 'ExpiredCodeException':
@@ -133,11 +174,10 @@ export function authErrorMessage(err: unknown): string {
 }
 
 /** เงื่อนไขรหัสผ่านให้ตรงกับ password policy ใน AuthStack */
+export const PASSWORD_MIN_LENGTH = 6
+
 export function passwordProblems(pw: string): string[] {
   const out: string[] = []
-  if (pw.length < 10) out.push('อย่างน้อย 10 ตัวอักษร')
-  if (!/[a-z]/.test(pw)) out.push('มีตัวพิมพ์เล็ก (a-z)')
-  if (!/[A-Z]/.test(pw)) out.push('มีตัวพิมพ์ใหญ่ (A-Z)')
-  if (!/\d/.test(pw)) out.push('มีตัวเลข (0-9)')
+  if (pw.length < PASSWORD_MIN_LENGTH) out.push(`อย่างน้อย ${PASSWORD_MIN_LENGTH} ตัวอักษร`)
   return out
 }

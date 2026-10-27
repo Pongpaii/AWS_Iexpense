@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { authErrorMessage, completeNewPassword, passwordProblems } from '../aws/auth'
+import {
+  authErrorMessage,
+  completeNewPassword,
+  PASSWORD_MIN_LENGTH,
+  passwordProblems,
+} from '../aws/auth'
 import { publishSignedIn } from '../lib/authSession'
 
 /**
@@ -13,7 +18,7 @@ const emit = defineEmits<{
 }>()
 
 /** ตรงกับ password policy ของ User Pool (AuthStack) */
-const MIN_LENGTH = 10
+const MIN_LENGTH = PASSWORD_MIN_LENGTH
 
 const password = ref('')
 const confirmation = ref('')
@@ -63,7 +68,6 @@ const savePassword = async () => {
       <h1 id="reset-title">ตั้งรหัสผ่านใหม่</h1>
       <p class="reset-description">
         บัญชีนี้ใช้รหัสผ่านชั่วคราว ตั้งรหัสผ่านใหม่ยาวอย่างน้อย {{ MIN_LENGTH }} ตัวอักษร
-        มีตัวพิมพ์ใหญ่ ตัวพิมพ์เล็ก และตัวเลข
       </p>
 
       <form class="reset-form" @submit.prevent="savePassword">

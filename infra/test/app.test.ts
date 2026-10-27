@@ -69,7 +69,7 @@ describe('ทั้ง app: กฎค่าใช้จ่าย', () => {
         count++;
       }
     }
-    expect(count).toBe(3); // api, account, access logs
+    expect(count).toBe(4); // api, account, access logs, presignup
   });
 
   it('S3 bucket ทุกตัวต้อง block public access ทั้งหมด', () => {

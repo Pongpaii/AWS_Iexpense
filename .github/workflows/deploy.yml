@@ -110,6 +110,8 @@ jobs:
           VITE_COGNITO_USER_POOL_ID: ${{ steps.out.outputs.pool }}
           VITE_COGNITO_CLIENT_ID: ${{ steps.out.outputs.client }}
           VITE_AWS_REGION: ${{ steps.out.outputs.region }}
+          VITE_DEMO_EMAIL: ${{ vars.VITE_DEMO_EMAIL }}
+          VITE_DEMO_PASSWORD: ${{ vars.VITE_DEMO_PASSWORD }}
         run: npm run build -w web
 
       # อัปโหลด assets (มี hash) ก่อน แล้วค่อยอัปโหลด index.html/sw.js → ผู้ใช้ไม่เจอไฟล์ที่ยังไม่ขึ้น

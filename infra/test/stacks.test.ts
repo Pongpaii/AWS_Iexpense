@@ -66,9 +66,10 @@ describe('AuthStack', () => {
   const stack = new AuthStack(newApp(), 'Auth', { env, retainData: true });
   const t = Template.fromStack(stack);
 
-  it('ปิด self sign-up, login ด้วย email, ลืมรหัสผ่านทางอีเมล, Lite plan', () => {
+  it('เปิด self sign-up, login ด้วย email, ลืมรหัสผ่านทางอีเมล, Lite plan', () => {
     t.hasResourceProperties('AWS::Cognito::UserPool', {
-      AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: true }),
+      AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: false }),
+      VerificationMessageTemplate: Match.objectLike({ DefaultEmailOption: 'CONFIRM_WITH_CODE' }),
       UsernameAttributes: ['email'],
       AutoVerifiedAttributes: ['email'],
       AccountRecoverySetting: {
@@ -84,7 +85,24 @@ describe('AuthStack', () => {
   it('ไม่มี SMS (ไม่มีค่าใช้จ่าย SNS)', () => {
     const pool = Object.values(t.findResources('AWS::Cognito::UserPool'))[0]!;
     expect(pool.Properties.SmsConfiguration).toBeUndefined();
-    t.resourceCountIs('AWS::IAM::Role', 0);
+    // role เดียวคือของ PreSignUp Lambda (ไม่มี role สำหรับส่ง SMS)
+    t.resourceCountIs('AWS::IAM::Role', 1);
+  });
+
+  it('PreSignUp trigger ยืนยันบัญชีอัตโนมัติ (ไม่ต้องกรอกรหัสจากอีเมล)', () => {
+    t.hasResourceProperties('AWS::Cognito::UserPool', {
+      LambdaConfig: { PreSignUp: Match.anyValue() },
+    });
+    const fn = Object.values(t.findResources('AWS::Lambda::Function'))[0]!;
+    const code = String(fn.Properties.Code.ZipFile);
+    expect(code).toContain('autoConfirmUser = true');
+    expect(code).toContain('autoVerifyEmail = false');
+    expect(code).toContain('PreSignUp_SignUp');
+    t.hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 7 });
+  });
+
+  it('มี group "demo" สำหรับบัญชีทดลองที่ใช้ร่วมกัน', () => {
+    t.hasResourceProperties('AWS::Cognito::UserPoolGroup', { GroupName: 'demo' });
   });
 
   it('retainData=true → RETAIN', () => {
@@ -129,7 +147,15 @@ describe('ทุก resource ติด tag project=money-flow', () => {
         string,
         { Type: string; Properties?: Record<string, unknown> }
       >,
-    ).filter((r) => !['AWS::Cognito::UserPoolClient', 'AWS::CDK::Metadata'].includes(r.Type));
+    ).filter(
+      (r) =>
+        ![
+          'AWS::Cognito::UserPoolClient',
+          'AWS::Cognito::UserPoolGroup',
+          'AWS::Lambda::Permission',
+          'AWS::CDK::Metadata',
+        ].includes(r.Type),
+    );
     for (const r of tagged) {
       const p = r.Properties ?? {};
       const tags = (p.Tags ?? p.UserPoolTags ?? p.ResourceTags) as unknown;

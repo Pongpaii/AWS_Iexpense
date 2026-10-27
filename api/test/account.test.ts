@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handler as accountHandler } from '../src/handlers/account';
 import { handler as apiHandler } from '../src/handlers/api';
 import { FakeDynamo } from './support/fake-dynamo';
-import { USER_A, USER_B, makeCaller, txBody } from './support/helpers';
+import { USER_A, USER_B, makeCaller, makeEvent, txBody } from './support/helpers';
 
 const api = makeCaller(apiHandler);
 const account = makeCaller(accountHandler);
@@ -51,4 +51,18 @@ describe('DELETE /account', () => {
   it('route อื่นที่หลงมา → 404', async () => {
     expect((await account('GET /account')).status).toBe(404);
   });
+
+  it.each([['[demo]'], ['[admin demo]'], [['demo']]])(
+    'บัญชีทดลอง (cognito:groups=%j) ลบไม่ได้ → 403 และไม่แตะข้อมูล',
+    async (groups) => {
+      await api('POST /transactions', { body: txBody() });
+      const event = makeEvent('DELETE /account', { body: { confirm: 'ลบบัญชี' } });
+      (event.requestContext.authorizer.jwt.claims as Record<string, unknown>)['cognito:groups'] =
+        groups;
+      const res = await accountHandler(event);
+      expect(res.statusCode).toBe(403);
+      expect(db.partition(`USER#${USER_A}`)).not.toEqual([]);
+      expect(cognito.commandCalls(AdminDeleteUserCommand)).toHaveLength(0);
+    },
+  );
 });
