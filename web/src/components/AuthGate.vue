@@ -17,10 +17,6 @@ const props = defineProps<{
   initialError?: string
 }>()
 
-const emit = defineEmits<{
-  demo: []
-}>()
-
 /**
  * บัญชีทดลองที่ใช้ร่วมกัน: ผู้ใช้พิมพ์ "demo" / รหัสผ่าน แทนอีเมลได้
  * Cognito login ด้วยอีเมลเท่านั้น จึงแปลง "demo" → VITE_DEMO_EMAIL ก่อนส่ง
@@ -609,9 +605,9 @@ const confirmReset = async () => {
         </button>
       </form>
 
-      <div class="demo-divider"><span>หรือ</span></div>
-
       <template v-if="isBackendConfigured && hasDemoAccount">
+        <div class="demo-divider"><span>หรือ</span></div>
+
         <button
           class="demo-button demo-account-button"
           type="button"
@@ -619,7 +615,7 @@ const confirmReset = async () => {
           @click="signInWithDemoAccount"
         >
           <span aria-hidden="true">🔑</span>
-          เข้าสู่ระบบด้วยบัญชีทดลอง
+          เข้าใช้งาน Demo
         </button>
         <p class="demo-note">
           ชื่อผู้ใช้ <b>{{ DEMO_USERNAME }}</b> · รหัสผ่าน <b>{{ demoPassword }}</b
@@ -628,15 +624,7 @@ const confirmReset = async () => {
         </p>
       </template>
 
-      <button class="demo-button" type="button" @click="emit('demo')">
-        <span aria-hidden="true">👀</span>
-        เข้าดูตัวอย่างแอป (Demo)
-      </button>
-      <p class="demo-note">
-        เข้าไม่ได้ก็ดูได้ ข้อมูลเป็นตัวอย่างสมมติ ดูได้อย่างเดียว เพิ่ม/แก้ไข/ลบไม่ได้
-      </p>
-
-      <small>สมัครฟรีด้วยอีเมล ใช้ได้ทันทีไม่ต้องยืนยัน หรือทดลองผ่านโหมด Demo</small>
+      <small>สมัครฟรีด้วยอีเมล ใช้ได้ทันทีไม่ต้องยืนยัน</small>
     </section>
   </main>
 </template>

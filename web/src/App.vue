@@ -400,7 +400,6 @@ onMounted(() => void auth.initialize())
         ? 'เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบใหม่ ระบบจะพากลับไปหน้าที่ค้างไว้'
         : authError
     "
-    @demo="enterDemoMode"
   />
 
   <div v-else class="app-shell" :class="{ 'app-shell--demo': demoMode }">

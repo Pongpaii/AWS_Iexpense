@@ -398,14 +398,8 @@ describe('AuthGate', () => {
     })
   })
 
-  it('มีทางเข้าโหมดดูตัวอย่างที่ส่ง event demo', async () => {
+  it('ไม่มีปุ่มโหมดดูตัวอย่างแบบอ่านอย่างเดียวแล้ว (เหลือแค่บัญชีทดลอง)', () => {
     const wrapper = mountGate()
-    const demoButton = wrapper
-      .findAll('button')
-      .find((button) => button.text().includes('ตัวอย่าง'))
-
-    await demoButton?.trigger('click')
-
-    expect(wrapper.emitted('demo')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('ดูตัวอย่าง')
   })
 })

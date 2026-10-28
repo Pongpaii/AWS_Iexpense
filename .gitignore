@@ -12,6 +12,9 @@ cdk-outputs.json
 .DS_Store
 Thumbs.db
 
+# ข้อมูลจริงที่ export มาจากระบบเก่า (ห้าม commit)
+import data/
+
 # Android (Capacitor)
 web/android/.gradle/
 web/android/build/
