@@ -403,3 +403,15 @@ describe('AuthGate', () => {
     expect(wrapper.text()).not.toContain('ดูตัวอย่าง')
   })
 })
+
+describe('AuthGate infra link', () => {
+  it('มีลิงก์ไปหน้าแผนภาพ AWS Infrastructure (เปิดแท็บใหม่)', () => {
+    const wrapper = mountGate()
+    const link = wrapper.find('a.infra-link')
+
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('href')).toBe('/infrastructure.html')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toContain('noopener')
+  })
+})

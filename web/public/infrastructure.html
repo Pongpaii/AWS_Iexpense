@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Money Flow — AWS Infrastructure</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #121a30;
+        --panel-2: #18223d;
+        --line: #2a3658;
+        --text: #e6ebf5;
+        --muted: #93a0bd;
+        --c-user: #4da3ff;
+        --c-auth: #ff5c7a;
+        --c-data: #c77dff;
+        --c-ci: #a0aec0;
+        --c-cost: #3ecf8e;
+        --s-network: #8c4fff;
+        --s-storage: #7aa116;
+        --s-compute: #ed7100;
+        --s-database: #c925d1;
+        --s-security: #dd344c;
+        --s-mgmt: #e7157b;
+        --s-ext: #3b82f6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          'Segoe UI',
+          'Noto Sans Thai',
+          'Sarabun',
+          system-ui,
+          -apple-system,
+          sans-serif;
+        line-height: 1.5;
+      }
+      header {
+        padding: 28px 32px 8px;
+      }
+      header .back {
+        display: inline-block;
+        margin-bottom: 8px;
+        color: #ffb84d;
+        font-size: 13px;
+        text-decoration: none;
+      }
+      header .back:hover,
+      header .back:focus-visible {
+        text-decoration: underline;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 26px;
+      }
+      header p {
+        margin: 4px 0 0;
+        color: var(--muted);
+      }
+      main {
+        padding: 16px 32px 48px;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin: 8px 0 16px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .legend i {
+        display: inline-block;
+        width: 26px;
+        height: 3px;
+        border-radius: 2px;
+      }
+      .legend i.dash {
+        background: none !important;
+        border-top: 3px dashed var(--c-ci);
+        height: 0;
+      }
+
+      /* ---------- diagram ---------- */
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 20px;
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+      .diagram-wrap {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        position: relative;
+      }
+      .canvas {
+        position: relative;
+        width: 1440px;
+        height: 1100px;
+        transform-origin: 0 0;
+      }
+      .cloud {
+        position: absolute;
+        border: 2px solid #ff9900;
+        border-radius: 12px;
+        background: rgba(255, 153, 0, 0.03);
+      }
+      .cloud > .tag {
+        position: absolute;
+        top: -13px;
+        left: 16px;
+        background: #ff9900;
+        color: #111;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 2px 10px;
+        border-radius: 6px;
+      }
+      .group {
+        position: absolute;
+        border: 1.5px dashed var(--line);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.015);
+      }
+      .group > .tag {
+        position: absolute;
+        top: 6px;
+        left: 12px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        color: var(--muted);
+      }
+      .group > .tag b {
+        color: var(--text);
+      }
+      .group.external {
+        border-color: #3b4a72;
+      }
+      .node {
+        position: absolute;
+        display: flex;
+        gap: 10px;
+        padding: 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        cursor: pointer;
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s,
+          opacity 0.15s;
+        z-index: 2;
+        text-align: left;
+        color: inherit;
+        font: inherit;
+      }
+      .node:hover,
+      .node:focus-visible,
+      .node.active {
+        border-color: #ffb84d;
+        box-shadow: 0 0 0 3px rgba(255, 184, 77, 0.2);
+        outline: none;
+      }
+      .node .icon {
+        flex: 0 0 38px;
+        height: 38px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        font-weight: 800;
+        font-size: 13px;
+        color: #fff;
+      }
+      .node .title {
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .node .sub {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .node .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 4px;
+      }
+      .chip {
+        font-size: 10.5px;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.07);
+        color: #c9d3ea;
+        white-space: nowrap;
+      }
+      .dim .node:not(.related) {
+        opacity: 0.35;
+      }
+      .dim svg .edge:not(.related) {
+        opacity: 0.12;
+      }
+      svg.edges {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        pointer-events: none;
+        overflow: visible;
+      }
+      svg .edge path {
+        fill: none;
+        stroke-width: 2.2;
+        stroke-linejoin: round;
+      }
+      svg .edge.dashed path {
+        stroke-dasharray: 7 5;
+      }
+      svg .edge text {
+        font-size: 11.5px;
+        fill: var(--text);
+        font-family: inherit;
+      }
+      svg .edge rect {
+        fill: var(--panel);
+        stroke: var(--line);
+      }
+      svg .edge {
+        transition: opacity 0.15s;
+      }
+      .rules {
+        position: absolute;
+        padding: 30px 14px 12px;
+        font-size: 12px;
+        color: #c9d3ea;
+      }
+      .rules ul {
+        margin: 0;
+        padding-left: 16px;
+      }
+      .rules li {
+        margin: 2px 0;
+      }
+
+      /* ---------- side panel ---------- */
+      aside {
+        position: sticky;
+        top: 16px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 18px;
+        min-height: 300px;
+      }
+      aside h2 {
+        margin: 0 0 4px;
+        font-size: 18px;
+      }
+      aside .stack {
+        color: #ffb84d;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      aside ul {
+        padding-left: 18px;
+        margin: 10px 0 0;
+      }
+      aside li {
+        margin: 4px 0;
+        font-size: 13.5px;
+      }
+      aside code,
+      section code {
+        background: rgba(255, 255, 255, 0.07);
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-size: 12.5px;
+      }
+      aside .hint {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* ---------- sections ---------- */
+      section {
+        margin-top: 28px;
+      }
+      section h2 {
+        font-size: 20px;
+        margin: 0 0 12px;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 14px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px 16px;
+      }
+      .card h3 {
+        margin: 0 0 2px;
+        font-size: 15px;
+      }
+      .card .desc {
+        color: var(--muted);
+        font-size: 12.5px;
+        margin-bottom: 6px;
+      }
+      .card ul {
+        margin: 0;
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .pipeline {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 13px;
+        max-width: 240px;
+      }
+      .step b {
+        display: block;
+        font-size: 13.5px;
+      }
+      .step span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .arrow {
+        color: var(--muted);
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+        background: var(--panel);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      th {
+        background: var(--panel-2);
+        color: var(--muted);
+        font-weight: 600;
+      }
+      footer {
+        color: var(--muted);
+        font-size: 12px;
+        padding: 0 32px 32px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a class="back" href="./">← กลับไปหน้า Money Flow</a>
+      <h1>Money Flow — AWS Infrastructure</h1>
+      <p>
+        AWS CDK (TypeScript) · Region <code>ap-southeast-1</code> · 6 stacks · serverless ล้วน
+        ออกแบบให้อยู่ใน Free Tier
+      </p>
+    </header>
+
+    <main>
+      <div class="legend" aria-label="คำอธิบายสัญลักษณ์">
+        <span><i style="background: var(--c-user)"></i>ทราฟฟิกผู้ใช้</span>
+        <span><i style="background: var(--c-auth)"></i>Authentication</span>
+        <span><i style="background: var(--c-data)"></i>ข้อมูล / IAM permission</span>
+        <span><i style="background: var(--c-ci)"></i>CI/CD</span>
+        <span><i style="background: var(--c-cost)"></i>แจ้งเตือนค่าใช้จ่าย</span>
+        <span>คลิกที่กล่องเพื่อดูรายละเอียด</span>
+      </div>
+
+      <div class="layout">
+        <div class="diagram-wrap" id="wrap">
+          <div class="canvas" id="canvas">
+            <svg class="edges" id="edges" width="1440" height="1100" aria-hidden="true">
+              <defs id="markers"></defs>
+            </svg>
+          </div>
+        </div>
+
+        <aside id="detail" aria-live="polite">
+          <h2>รายละเอียด</h2>
+          <p class="hint">
+            คลิก (หรือกด Tab + Enter) ที่ resource ในแผนภาพเพื่อดูค่าที่ตั้งไว้ใน CDK
+            และเส้นที่เชื่อมต่อกับมัน
+          </p>
+        </aside>
+      </div>
+
+      <section>
+        <h2>CDK Stacks</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Stack</th>
+              <th>ไฟล์</th>
+              <th>Resources หลัก</th>
+              <th>Outputs</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>MoneyFlow-WebStack</b></td>
+              <td><code>infra/lib/web-stack.ts</code></td>
+              <td>
+                S3 bucket (private, BPA) · CloudFront Distribution + OAC · CloudFront Function (SPA
+                rewrite) · Response Headers Policy ×2 · Cache Policy (assets 1 ปี)
+              </td>
+              <td>
+                <code>WebUrl</code>, <code>WebBucketName</code>, <code>WebDistributionId</code>
+              </td>
+            </tr>
+            <tr>
+              <td><b>MoneyFlow-AuthStack</b></td>
+              <td><code>infra/lib/auth-stack.ts</code></td>
+              <td>
+                Cognito User Pool (Lite) · App Client (SRP) · Group <code>demo</code> · Lambda
+                PreSignUp
+              </td>
+              <td>
+                <code>ViteCognitoUserPoolId</code>, <code>ViteCognitoClientId</code>,
+                <code>ViteAwsRegion</code>
+              </td>
+            </tr>
+            <tr>
+              <td><b>MoneyFlow-DataStack</b></td>
+              <td><code>infra/lib/data-stack.ts</code></td>
+              <td>DynamoDB table <code>MoneyFlow</code> (single-table, on-demand, ไม่มี GSI)</td>
+              <td><code>TableName</code></td>
+            </tr>
+            <tr>
+              <td><b>MoneyFlow-ApiStack</b></td>
+              <td><code>infra/lib/api-stack.ts</code></td>
+              <td>
+                HTTP API + Cognito JWT authorizer · Stage <code>$default</code> (throttle 20/40) ·
+                Lambda <code>money-flow-api</code>, <code>money-flow-account</code> · Log groups
+              </td>
+              <td><code>ViteApiUrl</code></td>
+            </tr>
+            <tr>
+              <td><b>MoneyFlow-BudgetStack</b></td>
+              <td><code>infra/lib/budget-stack.ts</code></td>
+              <td>AWS Budget รายเดือน · Cost Anomaly Monitor + Subscription</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><b>MoneyFlow-CiStack</b></td>
+              <td><code>infra/lib/ci-stack.ts</code></td>
+              <td>GitHub OIDC Provider · IAM Role <code>money-flow-github-deploy</code></td>
+              <td><code>GithubDeployRoleArn</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Deploy pipeline (<code>.github/workflows/deploy.yml</code>)</h2>
+        <div class="pipeline">
+          <div class="step"><b>push → main</b><span>หรือ workflow_dispatch</span></div>
+          <span class="arrow">→</span>
+          <div class="step">
+            <b>ci.yml</b
+            ><span>typecheck · lint · prettier · test · build · cdk synth + cost report</span>
+          </div>
+          <span class="arrow">→</span>
+          <div class="step"><b>OIDC → IAM Role</b><span>ไม่มี access key ใน GitHub</span></div>
+          <span class="arrow">→</span>
+          <div class="step">
+            <b>cdk deploy</b><span>Budget · Auth · Data · Api · Web (ไม่รวม CiStack)</span>
+          </div>
+          <span class="arrow">→</span>
+          <div class="step">
+            <b>Deploy ApiStack ซ้ำ</b><span>เฉพาะครั้งแรก เพื่อใส่ CORS ของโดเมน CloudFront</span>
+          </div>
+          <span class="arrow">→</span>
+          <div class="step"><b>build web</b><span>ใส่ค่า VITE_* จาก cdk-outputs.json</span></div>
+          <span class="arrow">→</span>
+          <div class="step">
+            <b>s3 sync</b
+            ><span>assets/ (immutable) ก่อน แล้วค่อย index.html, sw.js (no-cache)</span>
+          </div>
+          <span class="arrow">→</span>
+          <div class="step"><b>CloudFront invalidation</b><span>/index.html /sw.js</span></div>
+        </div>
+        <p style="color: var(--muted); font-size: 13px">
+          <code>android.yml</code>: build web → <code>cap sync android</code> → Gradle
+          <code>assembleDebug</code> → อัปโหลด APK เป็น artifact (อ่านค่า VITE_* จาก CloudFormation
+          outputs ผ่าน role เดียวกัน)
+        </p>
+      </section>
+
+      <section>
+        <h2>จุดเด่นด้าน Security / Cost</h2>
+        <div class="cards">
+          <div class="card">
+            <h3>Security</h3>
+            <ul>
+              <li>S3 ปิด public ทั้งหมด เข้าถึงผ่าน CloudFront OAC เท่านั้น, บังคับ SSL</li>
+              <li>CSP เข้มงวด, HSTS preload, X-Frame-Options DENY, Permissions-Policy</li>
+              <li>ทุก route ของ API ต้องมี JWT จาก Cognito (default authorizer)</li>
+              <li>CORS จำกัดเฉพาะโดเมน CloudFront + localhost (dev / Capacitor)</li>
+              <li>GitHub OIDC จำกัด repo + branch <code>main</code>, session ≤ 1 ชม.</li>
+              <li>CI แก้สิทธิ์ของตัวเองไม่ได้ (CiStack deploy ด้วยมือ)</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Cost guard (<code>infra/lib/cost-guard.ts</code>)</h3>
+            <div class="desc">CDK Aspect ตรวจทุก resource ตอน synth — ผิดกฎ synth ล้มทันที</div>
+            <ul>
+              <li>
+                ห้าม RDS, EC2, NAT Gateway, EIP, ELB, ElastiCache, OpenSearch, WAF, KMS Key, Secrets
+                Manager, RUM
+              </li>
+              <li>Lambda: Node.js 22, arm64, 256 MB, timeout ≤ 10s, ไม่อยู่ใน VPC</li>
+              <li>Log group retention 7 วัน</li>
+              <li>DynamoDB ต้องเป็น PAY_PER_REQUEST</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>แจ้งเตือนค่าใช้จ่าย</h3>
+            <ul>
+              <li>Budget รายเดือน $20 แจ้งเมื่อ actual &gt; $1, $5, $20</li>
+              <li>แจ้งเมื่อ forecast &gt; $10</li>
+              <li>ไม่นับเครดิต/refund เพื่อไม่ให้เครดิตบังการใช้งานจริง</li>
+              <li>Cost Anomaly Detection รายวัน เมื่อผลกระทบ ≥ $1</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>สร้างจากซอร์สใน <code>infra/</code> และ <code>.github/workflows/</code></footer>
+    <script src="./infrastructure.js" defer></script>
+  </body>
+</html>

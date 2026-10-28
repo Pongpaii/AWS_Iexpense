@@ -30,7 +30,7 @@ export default defineConfig(
     languageOptions: { globals: { ...globals.node } },
   },
   {
-    files: ['web/**/*.{ts,vue}'],
+    files: ['web/**/*.{ts,vue}', 'web/public/infrastructure.js'],
     languageOptions: { globals: { ...globals.browser } },
   },
   {

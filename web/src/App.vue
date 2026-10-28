@@ -17,7 +17,7 @@ import { useTransactions } from './composables/useTransactions'
 import { useUndoDelete } from './composables/useUndoDelete'
 import { isBackendConfigured } from './lib/backend'
 import type { Transaction, TransactionType } from './types/transaction'
-import { createDemoTransactions, DEMO_USER_EMAIL } from './utils/demoData'
+import { DEMO_USER_EMAIL } from './utils/demoData'
 import { exportMonthlyCsv } from './utils/monthlyExport'
 
 /**
@@ -312,20 +312,6 @@ const handleMonthlyExport = async () => {
   } finally {
     exportBusy.value = false
   }
-}
-
-const enterDemoMode = () => {
-  demoMode.value = true
-  clearError()
-  clearUndo()
-  tx.setTransactions(createDemoTransactions())
-  selectedRecordDate.value = todayDate
-  selectedOverviewMonth.value = todayDate.slice(0, 7)
-  viewMode.value = 'month'
-  selectionMode.value = false
-  navigateTo('record')
-  void loadAchievements()
-  showMessage('เข้าโหมดดูตัวอย่างแล้ว ข้อมูลทั้งหมดเป็นตัวอย่างสมมติ')
 }
 
 const exitDemoMode = () => {

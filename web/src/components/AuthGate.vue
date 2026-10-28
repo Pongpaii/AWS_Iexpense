@@ -31,6 +31,9 @@ const hasDemoAccount = Boolean(demoEmail && demoPassword)
 const resolveLoginId = (input: string): string =>
   hasDemoAccount && input.trim().toLowerCase() === DEMO_USERNAME ? demoEmail : input
 
+/** แผนภาพ infra (static ไฟล์ใน web/public) — ใช้ BASE_URL ให้ทำงานได้ทั้งบนเว็บและ Capacitor */
+const infraUrl = `${import.meta.env.BASE_URL}infrastructure.html`
+
 /**
  * สมัครสมาชิก: Cognito ส่ง "รหัสยืนยัน" ทางอีเมล กรอกรหัสในหน้านี้ แล้วเข้าสู่ระบบให้อัตโนมัติ
  * ลืมรหัสผ่าน: Cognito ส่ง "รหัสยืนยัน" ทางอีเมล (ไม่ใช่ลิงก์) แล้วตั้งรหัสใหม่ในหน้านี้เลย
@@ -625,6 +628,12 @@ const confirmReset = async () => {
       </template>
 
       <small>สมัครฟรีด้วยอีเมล ใช้ได้ทันทีไม่ต้องยืนยัน</small>
+
+      <a class="infra-link" :href="infraUrl" target="_blank" rel="noopener">
+        <span aria-hidden="true">🏗️</span>
+        ดู AWS Infrastructure ของโปรเจกต์นี้
+        <span class="visually-hidden">(เปิดในแท็บใหม่)</span>
+      </a>
     </section>
   </main>
 </template>
@@ -947,6 +956,43 @@ h1 {
   margin-top: 18px;
   color: #96a19b;
   font-size: 0.58rem;
+}
+
+.infra-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 7px 12px;
+  border: 1px solid #d7e2dc;
+  border-radius: 999px;
+  color: #38614c;
+  background: #fff;
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    border-color 0.16s,
+    background 0.16s;
+}
+
+.infra-link:hover {
+  border-color: #a7c3b3;
+  background: #f4faf6;
+}
+
+.infra-link:focus-visible {
+  outline: 3px solid rgba(64, 137, 99, 0.28);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .auth-spinner {
